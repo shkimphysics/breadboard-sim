@@ -903,7 +903,7 @@ function partMarkup(p) {
       let s = hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, bl / 2 - 1) + '</g>' + flowLine(g) + '<g transform="' + xf(g) + '">' +
         '<rect class="res-body" data-role="body" x="' + f1(-bl / 2) + '" y="-6.5" width="' + f1(bl) + '" height="13" rx="5"/>';
       bands.forEach((c, i) => { s += '<rect x="' + f1(bx[i] - 1.6) + '" y="-6.5" width="3.2" height="13" style="fill:' + c + '"/>'; });
-      return s + '</g>' + tipDots(g) + labelAt(g, fmtR(p.R));
+      return s + '</g>' + tipDots(g) + labelAt(g, p.name + ' · ' + fmtR(p.R));
     }
     case 'led': {
       const t = LED_TYPES[p.color] || LED_TYPES.red;
