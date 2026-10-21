@@ -80,6 +80,19 @@ ok(text('#inspector').includes('100 Ω'), '저항값 100Ω 반영');
 const inp = $('#inpR'); inp.value = '470'; inp.dispatchEvent(new w.Event('input', { bubbles: true }));
 ok(/470/.test($('.part-resistor').textContent), '직접 입력 470Ω 라벨');
 
+// 저항 이름 직접 바꾸기
+const inpN = $('#inpName'); inpN.value = '전류제한저항'; inpN.dispatchEvent(new w.Event('input', { bubbles: true }));
+ok($('.part-resistor').textContent.includes('전류제한저항'), '저항 이름 변경 라벨: ' + $('.part-resistor').textContent);
+ok(/470/.test($('.part-resistor').textContent), '이름 변경 후에도 값 표시 유지');
+
+// 저항 이름/값 표시 토글
+$('#optResValue').click();
+ok(!/470/.test($('.part-resistor').textContent) && $('.part-resistor').textContent.includes('전류제한저항'), '값 표시 끄면 이름만 남음: ' + $('.part-resistor').textContent);
+$('#optResName').click();
+ok($('.part-resistor').textContent.trim() === '', '이름도 끄면 라벨 없음: "' + $('.part-resistor').textContent + '"');
+$('#optResName').click(); $('#optResValue').click();
+ok($('.part-resistor').textContent.includes('전류제한저항') && /470/.test($('.part-resistor').textContent), '다시 켜면 이름+값 복원');
+
 // 전압 슬라이더
 const vi = $('#vIn'); vi.value = '9'; vi.dispatchEvent(new w.Event('input', { bubbles: true }));
 ok(text('#psuV') === '9.0 V', '숫자 입력 9V: ' + text('#psuV'));

@@ -282,6 +282,8 @@ svg.no-flow .flow{display:none}
         <label class="sw">전류 흐름 보기<input type="checkbox" id="optFlow" checked></label>
         <label class="sw">전위(전압) 색상<input type="checkbox" id="optColor" checked></label>
         <label class="sw">부품 고장 시뮬레이션<input type="checkbox" id="optFaults" checked></label>
+        <label class="sw">저항 이름 표시<input type="checkbox" id="optResName" checked></label>
+        <label class="sw">저항 값(Ω) 표시<input type="checkbox" id="optResValue" checked></label>
       </div>
       <div style="margin-top:12px">
         <div class="legend"></div>
@@ -390,7 +392,7 @@ const TOOLS = [
 const PLACE = new Set(['wire', 'resistor', 'led', 'bulb', 'switch', 'ammeter']);
 
 /* ----- 상태 ----- */
-const state = { parts: [], psu: { on: true, V: 5, fuse: false }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true } };
+const state = { parts: [], psu: { on: true, V: 5, fuse: false }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true, resName: true, resValue: true } };
 const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, note: null, drag: null, suppressClick: false, linkNet: null };
 let last = { R: 220, led: 'red' };
 let sim = null;
@@ -552,7 +554,10 @@ function partMarkup(p) {
       let s = hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, bl / 2 - 1) + '</g>' + flowLine(g) + '<g transform="' + xf(g) + '">' +
         '<rect class="res-body" data-role="body" x="' + f1(-bl / 2) + '" y="-6.5" width="' + f1(bl) + '" height="13" rx="5"/>';
       bands.forEach((c, i) => { s += '<rect x="' + f1(bx[i] - 1.6) + '" y="-6.5" width="3.2" height="13" style="fill:' + c + '"/>'; });
-      return s + '</g>' + tipDots(g) + labelAt(g, p.name + ' · ' + fmtR(p.R));
+      s += '</g>' + tipDots(g);
+      const showN = state.settings.resName, showV = state.settings.resValue;
+      const lab = showN && showV ? p.name + ' · ' + fmtR(p.R) : showN ? p.name : showV ? fmtR(p.R) : '';
+      return s + (lab ? labelAt(g, lab) : '');
     }
     case 'led': {
       const t = LED_TYPES[p.color] || LED_TYPES.red;
@@ -611,7 +616,7 @@ function createCtl(p) {
   const q = r => el.querySelector('[data-role="' + r + '"]');
   return { el, flow: q('flow'), glow: q('glow'), dome: q('dome'), fil: q('fil'), glass: q('glass'), amm: q('amm'), body: q('body') };
 }
-const sigOf = p => [p.type, p.a, p.b, p.R, p.color, p.closed ? 1 : 0, p.name].join('|');
+const sigOf = p => [p.type, p.a, p.b, p.R, p.color, p.closed ? 1 : 0, p.name, state.settings.resName ? 1 : 0, state.settings.resValue ? 1 : 0].join('|');
 
 function ledBrightness(i) { return i < 1e-5 ? 0 : clamp(Math.pow(i / 0.02, 0.6), 0, 1.15); }
 function bulbBrightness(pw) { return pw < 1e-4 ? 0 : clamp(Math.pow(pw / E.BULB_RATED_P, 0.65), 0, 1.2); }
@@ -767,6 +772,7 @@ function renderInspector() {
   }
   let h = '<div class="insp-head"><span class="tag">' + TYPE_NAME[p.type] + '</span><strong>' + esc(p.name) + '</strong><button class="btn small danger" data-act="del" title="삭제 (Delete)">삭제</button></div>';
   if (p.type === 'resistor') {
+    h += '<div class="field"><span class="lab">이름</span><div class="numin"><input type="text" id="inpName" maxlength="16" value="' + esc(p.name) + '" aria-label="저항 이름"></div></div>';
     h += '<div class="field"><span class="lab">저항값</span><div class="numin"><input type="number" id="inpR" min="0.1" step="any" value="' + p.R + '" aria-label="저항값(옴)"><span class="muted">Ω</span></div><div class="chips" id="rChips">' +
       R_CHIPS.map(v => '<button class="chip" data-act="setR" data-v="' + v + '" aria-pressed="' + (v === p.R) + '">' + fmtR(v) + '</button>').join('') + '</div></div>';
   } else if (p.type === 'bulb') {
@@ -1143,12 +1149,17 @@ document.addEventListener('input', e => {
     p.R = v; last.R = v;
     $$('#rChips .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.v === v ? 'true' : 'false'));
     refresh(false);
+  } else if (e.target.id === 'inpName') {
+    const p = sel(), v = e.target.value.trim();
+    if (!p || !v) return;
+    p.name = v.slice(0, 16);
+    refresh(false);
   }
 });
 let inpSnap = null;
-document.addEventListener('focusin', e => { if (e.target.id === 'inpR') inpSnap = snapshot(); });
+document.addEventListener('focusin', e => { if (e.target.id === 'inpR' || e.target.id === 'inpName') inpSnap = snapshot(); });
 document.addEventListener('change', e => {
-  if (e.target.id === 'inpR' && inpSnap && inpSnap !== snapshot()) { pushHistory(inpSnap); inpSnap = null; }
+  if ((e.target.id === 'inpR' || e.target.id === 'inpName') && inpSnap && inpSnap !== snapshot()) { pushHistory(inpSnap); inpSnap = null; }
 });
 
 const V_MAX = 30;
@@ -1233,6 +1244,7 @@ if (!load()) {
   history.length = 0;
 }
 bindOpt('optFlow', 'flow'); bindOpt('optColor', 'color'); bindOpt('optFaults', 'faults');
+bindOpt('optResName', 'resName'); bindOpt('optResValue', 'resValue');
 setTool('select');
 refresh(true);
 })();
