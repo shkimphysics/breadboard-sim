@@ -43,10 +43,11 @@ opts.forEach(o => {
 });
 ok(errors.length === 0, '예제 전부 로드 오류 없음 ' + errors.join(' | '));
 
-// 비우기 (두 번 클릭)
+// 비우기 (두 번 클릭) — "모두 지우기"는 부품만 지우고 전압은 유지하므로, 뒤 테스트를 위해 5V로 맞춰 둔다
 $('#btnClear').click(); $('#btnClear').click();
 ok($$('.part').length === 0, '모두 지우기');
 ok(/전류가 흐르지 않아요|^$/.test(text('#alerts')) || text('#alerts') === '', '빈 회로 알림');
+{ const v0 = $('#vIn'); v0.value = '5'; v0.dispatchEvent(new w.Event('input', { bubbles: true })); v0.dispatchEvent(new w.Event('blur')); }
 
 // 저항 배치: 도구 → 구멍 두 곳
 $('.tool[data-tool=resistor]').click();

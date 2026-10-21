@@ -65,6 +65,13 @@ check('병렬 전구 공급 전류', r.res.supply.I, 0.595, 0.601);
 r = run('ammeter');
 check('전류계 값', r.res.parts.p2.i, 0.0498, 0.0501);
 
+r = run('mixed5');
+check('혼합5 전체 전류', r.res.supply.I, 0.07 * 0.998, 0.07 * 1.002);
+check('혼합5 R1 전류(직렬, 전체와 동일)', r.res.parts.p2.i, 0.07 * 0.998, 0.07 * 1.002);
+check('혼합5 R2 전류(병렬 1kΩ 쪽)', r.res.parts.p3.i, 0.014 * 0.99, 0.014 * 1.01);
+check('혼합5 R3 전류(병렬 100+150Ω 쪽)', r.res.parts.p4.i, 0.056 * 0.99, 0.056 * 1.01);
+check('혼합5 R5 전류(직렬, 전체와 동일)', r.res.parts.p6.i, 0.07 * 0.998, 0.07 * 1.002);
+
 r = run('led-burn');
 console.log('LED 고장 이벤트', r.events.map(e => e.type), 'burnt=', r.c.parts[1].burnt, 'fuse=', r.c.psu.fuse);
 if (!r.c.parts[1].burnt) fail++;

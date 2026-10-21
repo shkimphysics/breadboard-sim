@@ -690,6 +690,18 @@ const PRESETS = [
       { type: 'wire', a: 'rt+:1', b: 'a2' },
       { type: 'led', color: 'red', a: 'b2', b: 'b6' },
       { type: 'wire', a: 'a6', b: 'rt-:6' }]
+  },
+  {
+    id: 'mixed5', name: '저항 5개 혼합 회로 (R1+R5 직렬, R2 ∥ R3+R4)', V: 35,
+    note: 'R1(120 Ω)과 R5(180 Ω)는 직렬이고, 그 사이에서 R2(1 kΩ)가 R3+R4(100+150=250 Ω) 직렬 묶음과 병렬을 이룹니다. 병렬 부분의 합성 저항은 (1000×250)/(1000+250) = 200 Ω이라, 전체 저항은 120+200+180 = 500 Ω, 전체 전류는 35 V ÷ 500 Ω = 70 mA예요.',
+    parts: [
+      { type: 'wire', a: 'rt+:1', b: 'a2' },
+      { type: 'resistor', R: 120, a: 'b2', b: 'b7' },
+      { type: 'resistor', R: 1000, a: 'c7', b: 'c12' },
+      { type: 'resistor', R: 100, a: 'd7', b: 'd16' },
+      { type: 'resistor', R: 150, a: 'e16', b: 'e12' },
+      { type: 'resistor', R: 180, a: 'a12', b: 'a21' },
+      { type: 'wire', a: 'a21', b: 'rt-:18' }]
   }
 ];
 
