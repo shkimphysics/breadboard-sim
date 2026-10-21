@@ -1,0 +1,1239 @@
+<title>브레드보드 시뮬레이터</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* 레이아웃: 왼쪽 도구함 · 가운데 브레드보드 작업대 · 오른쪽 전원/부품/측정 패널 */
+:root{
+  --bg:#E4E9ED; --panel:#F6F8F9; --panel-2:#EAEFF2; --line:#C8D1D8;
+  --fg:#15212B; --muted:#586976;
+  --accent:#0B6E7A; --accent-ink:#FFFFFF; --accent-soft:#D2EAED;
+  --bench:#D3DBE1;
+  --board:#F1EFE6; --board-edge:#BDB8A6; --groove:#DAD6C6;
+  --hole:#2A2E31; --hole-ring:#B5B09E; --board-label:#7A7566;
+  --plus:#D93A2F; --minus:#2457C5; --current:#F5A300;
+  --ok:#1C8A4C; --warn:#9A5B00; --bad:#C23B2B;
+  --warn-soft:#FBEBD0; --bad-soft:#F9DAD5; --ok-soft:#D7EFE0;
+  --wire-outline:rgba(0,0,0,.38);
+  --shadow:0 1px 2px rgba(15,30,40,.12),0 10px 28px rgba(15,30,40,.12);
+  --font:'IBM Plex Sans KR','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
+  --mono:'IBM Plex Mono','D2Coding',ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#0E1418; --panel:#161E24; --panel-2:#1D2830; --line:#2C3943;
+    --fg:#E3EAEF; --muted:#8FA1AE;
+    --accent:#46C3D1; --accent-ink:#04242A; --accent-soft:#12383E;
+    --bench:#0A0F12;
+    --board:#2B3034; --board-edge:#171B1E; --groove:#1E2225;
+    --hole:#050607; --hole-ring:#4C555B; --board-label:#8B959B;
+    --plus:#FF6B5E; --minus:#6D9BFF; --current:#FFC233;
+    --ok:#4CCB84; --warn:#F0A63A; --bad:#FF7A6B;
+    --warn-soft:#3A2C12; --bad-soft:#3E1D19; --ok-soft:#14301F;
+    --wire-outline:rgba(255,255,255,.5);
+    --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0E1418; --panel:#161E24; --panel-2:#1D2830; --line:#2C3943;
+  --fg:#E3EAEF; --muted:#8FA1AE;
+  --accent:#46C3D1; --accent-ink:#04242A; --accent-soft:#12383E;
+  --bench:#0A0F12;
+  --board:#2B3034; --board-edge:#171B1E; --groove:#1E2225;
+  --hole:#050607; --hole-ring:#4C555B; --board-label:#8B959B;
+  --plus:#FF6B5E; --minus:#6D9BFF; --current:#FFC233;
+  --ok:#4CCB84; --warn:#F0A63A; --bad:#FF7A6B;
+  --warn-soft:#3A2C12; --bad-soft:#3E1D19; --ok-soft:#14301F;
+  --wire-outline:rgba(255,255,255,.5);
+  --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--fg);
+  font-family:var(--font);font-size:14px;line-height:1.5;
+  padding-block:12px;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2.5px solid var(--accent);outline-offset:2px}
+.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.app{display:grid;grid-template-columns:184px minmax(0,1fr) 312px;grid-template-rows:auto minmax(0,1fr);gap:12px;height:100%}
+.top{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand svg{flex:none}
+.brand h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.01em;line-height:1.2}
+.brand p{margin:0;font-size:12px;color:var(--muted)}
+.top-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;min-height:34px;font-weight:500}
+.btn:hover{background:var(--panel-2)}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.btn.danger{color:var(--bad);border-color:var(--bad)}
+.btn.small{min-height:28px;padding:3px 10px;font-size:13px}
+select.btn{padding-right:8px;max-width:100%}
+
+/* 도구함 */
+.tray{padding:10px;overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:14px}
+.tray h2,.card h2{margin:0 0 8px;font-size:12px;font-weight:600;letter-spacing:.08em;color:var(--muted)}
+.tools{display:flex;flex-direction:column;gap:4px}
+.tool{display:grid;grid-template-columns:28px 1fr auto;align-items:center;gap:8px;text-align:left;border:1px solid transparent;background:transparent;border-radius:9px;padding:6px 8px;min-height:38px}
+.tool:hover{background:var(--panel-2)}
+.tool[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--fg)}
+.tool svg{width:26px;height:26px}
+.tool kbd{font:500 11px var(--mono);color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 5px;background:var(--panel)}
+.toggles{display:flex;flex-direction:column;gap:8px}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:13px;cursor:pointer}
+.sw input{appearance:none;width:34px;height:20px;border-radius:20px;background:var(--line);position:relative;margin:0;cursor:pointer;flex:none;transition:background .15s}
+.sw input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.sw input:checked{background:var(--accent)}
+.sw input:checked::after{transform:translateX(14px)}
+.legend{height:10px;border-radius:5px;background:linear-gradient(90deg,#2f6fe4,#1fa3a3 34%,#e9b020 67%,#e0452f)}
+.legend-l{display:flex;justify-content:space-between;font:500 11px var(--mono);color:var(--muted);margin-top:3px}
+details.help{font-size:12.5px;color:var(--muted)}
+details.help summary{cursor:pointer;font-weight:600;color:var(--fg);font-size:13px}
+details.help ul{margin:6px 0 0;padding-left:16px;display:flex;flex-direction:column;gap:4px}
+
+/* 작업대 */
+.stage{display:flex;flex-direction:column;min-height:0;min-width:0;background:var(--bench);border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative}
+.board-wrap{flex:1;min-height:0;overflow:auto;display:flex;align-items:center;justify-content:center;padding:10px 12px}
+#board{display:block;width:100%;height:100%;max-height:100%;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+.statusbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:13px}
+.statusbar .hint{min-width:0;color:var(--fg)}
+.statusbar .hov{flex:none;font:500 13px var(--mono);color:var(--muted);text-align:right;min-width:12ch}
+.toast{position:absolute;left:50%;bottom:54px;transform:translate(-50%,8px);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:9px;font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;max-width:min(520px,90%);text-align:center;z-index:5}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+/* 오른쪽 패널 */
+.side{overflow-y:auto;min-height:0;display:flex;flex-direction:column;gap:12px;padding-right:2px}
+.card{padding:12px 14px}
+.row{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.psu-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.psu-top h2{margin:0}
+.power-sw{border:1px solid var(--line);background:var(--panel-2);border-radius:20px;padding:2px;width:58px;height:28px;position:relative}
+.power-sw span{position:absolute;top:2px;left:2px;width:22px;height:22px;border-radius:50%;background:var(--muted);transition:transform .15s,background .15s}
+.power-sw[aria-checked="true"]{background:var(--ok-soft);border-color:var(--ok)}
+.power-sw[aria-checked="true"] span{transform:translateX(30px);background:var(--ok)}
+.vbig{font:600 34px/1.1 var(--mono);letter-spacing:-.02em}
+.vbig small{font-size:16px;font-weight:500;color:var(--muted);margin-left:4px}
+input[type=range]{width:100%;accent-color:var(--accent);margin:8px 0 4px;height:28px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:var(--panel);border-radius:999px;padding:2px 10px;min-height:28px;font:500 12.5px var(--mono)}
+.chip:hover{background:var(--panel-2)}
+.chip[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.vin{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line);background:var(--panel);border-radius:10px;padding:2px 12px;margin:2px 0 4px}
+.vin:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.vin.bad{border-color:var(--bad)}
+.vin input{flex:1;min-width:0;border:0;background:transparent;font:600 32px/1.2 var(--mono);letter-spacing:-.02em;padding:4px 0;outline:none;color:var(--fg)}
+.vin .unit{font:500 18px var(--mono);color:var(--muted)}
+.vin-help{font-size:12px;margin:0 0 4px}
+.vin-help.bad{color:var(--bad)}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-top:10px}
+.stat{background:var(--panel-2);border-radius:8px;padding:6px 8px;min-width:0}
+.stat b{display:block;font:600 11px var(--font);color:var(--muted);letter-spacing:.04em}
+.stat span{font:600 15px var(--mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.insp-head{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.insp-head strong{font-size:16px;flex:1;min-width:0}
+.tag{font-size:11px;font-weight:600;border-radius:5px;padding:1px 7px;background:var(--accent-soft);color:var(--fg)}
+.field{margin:0 0 10px}
+.field>label,.field>.lab{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px}
+.numin{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.numin input{width:100%;min-width:0;border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:5px 9px;min-height:34px;font:500 15px var(--mono)}
+.sw-colors{display:flex;gap:8px;flex-wrap:wrap}
+.cdot{width:30px;height:30px;border-radius:50%;border:2px solid var(--line);padding:0}
+.cdot[aria-pressed="true"]{border-color:var(--fg);box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
+dl.meas{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0}
+dl.meas div{background:var(--panel-2);border-radius:8px;padding:6px 8px;min-width:0}
+dl.meas dt{font-size:11px;font-weight:600;color:var(--muted)}
+dl.meas dd{margin:0;font:600 15px var(--mono);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.formula{margin-top:10px;font-size:13px;line-height:1.55}
+.formula .eq{font:600 13.5px var(--mono);display:block;margin-top:2px;overflow-wrap:anywhere}
+.callout{margin-top:10px;border-radius:8px;padding:7px 10px;font-size:13px}
+.callout.warn{background:var(--warn-soft);color:var(--fg);border-left:3px solid var(--warn)}
+.callout.bad{background:var(--bad-soft);border-left:3px solid var(--bad)}
+.callout.info{background:var(--accent-soft);border-left:3px solid var(--accent)}
+.callout .btn{margin-top:6px}
+.alerts{display:flex;flex-direction:column;gap:8px}
+.alerts:empty{display:none}
+.alerts .callout{margin:0}
+.meter-read{font:600 26px/1.2 var(--mono);margin:2px 0 4px}
+.noteTitle{font-weight:700;margin-bottom:2px}
+
+/* SVG 요소 */
+.board-body{fill:var(--board);stroke:var(--board-edge);stroke-width:2}
+.board-groove{fill:var(--groove)}
+.blabel{fill:var(--board-label);font:500 9.5px var(--mono);text-anchor:middle}
+.railsign{font:700 15px var(--mono);text-anchor:middle}
+.rail-line{stroke-width:2.4;stroke-linecap:round;opacity:.85}
+.hole{fill:var(--hole);stroke:var(--hole-ring);stroke-width:1.1}
+.hole.link{stroke:var(--accent);stroke-width:2.2}
+.netstrip{opacity:0;pointer-events:none;transition:opacity .2s}
+.psu-box{fill:var(--panel);stroke:var(--line);stroke-width:1.6}
+.psu-title{fill:var(--muted);font:600 11px var(--font);letter-spacing:.06em}
+.lcd{fill:#0f2a1c;stroke:#071410;stroke-width:1.5}
+.lcd-v{fill:#6dffa8;font:600 25px var(--mono);text-anchor:start}
+.lcd-i{fill:#6dffa8;font:500 13px var(--mono);text-anchor:start;opacity:.9}
+.lcd-off{fill:#2b5a42}
+.cable-red{stroke:var(--plus)}
+.cable-black{stroke:#2b3035}
+.cable{fill:none;stroke-width:5;stroke-linecap:round}
+.cable-out{fill:none;stroke:var(--wire-outline);stroke-width:7.5;stroke-linecap:round}
+.term{stroke:rgba(0,0,0,.4);stroke-width:1.5}
+.term-text{fill:#fff;font:700 14px var(--mono);text-anchor:middle}
+.part .hit{fill:none;stroke:rgba(0,0,0,0);stroke-width:22;stroke-linecap:round;pointer-events:none}
+.part .hit.fat{pointer-events:stroke}
+svg.tool-select .part .hit,svg.tool-erase .part .hit{pointer-events:stroke}
+svg.tool-select .part,svg.tool-erase .part{cursor:pointer}
+svg.placing,svg.tool-meter{cursor:crosshair}
+.leg{stroke:#a9b2b9;stroke-width:2.6;stroke-linecap:round}
+.tip{fill:#c9d0d6;stroke:#5f6a72;stroke-width:1}
+.res-body{fill:#d9c18f;stroke:rgba(0,0,0,.4);stroke-width:1}
+.wire-out{fill:none;stroke:var(--wire-outline);stroke-width:8;stroke-linecap:round}
+.wire-col{fill:none;stroke-width:5;stroke-linecap:round}
+.wire-end{stroke:var(--wire-outline);stroke-width:1.4}
+.led-rim{fill:#bfc7cc;stroke:rgba(0,0,0,.35);stroke-width:1}
+.led-dome{stroke:rgba(0,0,0,.35);stroke-width:1}
+.led-shine{fill:rgba(255,255,255,.55)}
+.crack{display:none;fill:none;stroke:#0a0a0a;stroke-width:1.6;stroke-linecap:round}
+.bulb-glass{fill:rgba(190,215,235,.32);stroke:rgba(120,140,160,.85);stroke-width:1.4}
+.bulb-fil{fill:none;stroke:#8d7a55;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.bulb-base{fill:#9aa3a9;stroke:rgba(0,0,0,.4);stroke-width:1}
+.sw-body{fill:#3a4249;stroke:rgba(0,0,0,.5);stroke-width:1}
+.sw-contact{fill:#d2b25c}
+.sw-lever{stroke:#d2b25c;stroke-width:4;stroke-linecap:round}
+.amm-body{fill:#222a30;stroke:rgba(0,0,0,.6);stroke-width:1.2}
+.amm-text{fill:#6dffa8;font:600 11.5px var(--mono);text-anchor:middle}
+.plabel{font:600 10.5px var(--mono);fill:var(--fg);paint-order:stroke;stroke:var(--board);stroke-width:3.2px;stroke-linejoin:round;text-anchor:middle;pointer-events:none}
+.pmark{font:700 10px var(--mono);fill:var(--plus);paint-order:stroke;stroke:var(--board);stroke-width:2.4px;text-anchor:middle;pointer-events:none}
+.part.burnt .led-dome{fill:#38332f!important;fill-opacity:1!important}
+.part.burnt .crack{display:block}
+.part.burnt .bulb-fil{stroke:#1d1d1d!important}
+.part.burnt .bulb-glass{fill:rgba(60,60,60,.4)}
+.part.hot .res-body,.part.hot .led-dome{stroke:var(--bad);stroke-width:2}
+.ghost{opacity:.65;pointer-events:none}
+.flow{fill:none;stroke:var(--current);stroke-width:3.6;stroke-linecap:round;stroke-dasharray:.01 11;animation:flow var(--dur,1s) linear infinite;pointer-events:none}
+.part.burnt .flow{display:none}
+svg.no-flow .flow{display:none}
+@keyframes flow{to{stroke-dashoffset:-11.01}}
+.sel-line{stroke:var(--accent);stroke-width:22;stroke-linecap:round;opacity:.22;fill:none;pointer-events:none}
+.handle{fill:var(--panel);stroke:var(--accent);stroke-width:2.6;cursor:grab;touch-action:none}
+.pend{fill:none;stroke:var(--accent);stroke-width:2.6}
+.pend-pulse{fill:var(--accent);opacity:.25}
+.hover-ring{fill:none;stroke:var(--accent);stroke-width:2.4;pointer-events:none}
+.probe-line{stroke:var(--fg);stroke-width:1.6;stroke-dasharray:4 4;opacity:.7;fill:none}
+.probe-red{fill:#e0392f}
+.probe-black{fill:#2c3136}
+.probe-ring{stroke:#fff;stroke-width:2}
+.probe-text{fill:#fff;font:700 10px var(--mono);text-anchor:middle}
+.read-box{fill:var(--fg)}
+.read-text{fill:var(--bg);font:600 13px var(--mono);text-anchor:middle}
+
+@media (prefers-reduced-motion:reduce){
+  .flow{animation:none}
+  .toast,.netstrip{transition:none}
+}
+@media (max-width:1060px){
+  html,body{height:auto}
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:none;height:auto}
+  .tray{flex-direction:row;flex-wrap:wrap;overflow:visible;gap:10px 18px}
+  .tray>section{min-width:0}
+  .tools{flex-direction:row;flex-wrap:wrap}
+  .tool{grid-template-columns:26px auto;padding:5px 9px}
+  .tool kbd{display:none}
+  .stage{min-height:0}
+  .board-wrap{overflow-x:auto;justify-content:flex-start;padding:8px}
+  #board{min-width:820px;height:auto}
+  .side{overflow:visible;padding-right:0}
+  .statusbar{flex-wrap:wrap}
+}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="1" width="32" height="32" rx="8" fill="var(--accent)"/><g fill="var(--accent-ink)"><circle cx="10" cy="11" r="2"/><circle cx="17" cy="11" r="2"/><circle cx="24" cy="11" r="2"/><circle cx="10" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><circle cx="24" cy="17" r="2"/></g><path d="M8 24h6l2-4 3 8 2-4h5" fill="none" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div><h1>브레드보드 시뮬레이터</h1><p>통합과학2 · 전기 회로 실험</p></div>
+    </div>
+    <div class="top-actions">
+      <select id="presetSel" class="btn" aria-label="예제 회로 불러오기"></select>
+      <button class="btn" id="btnSaveCircuit" title="지금 회로를 JSON 파일로 저장">회로 저장</button>
+      <button class="btn" id="btnLoadCircuit" title="JSON 파일에서 회로 불러오기">회로 불러오기</button>
+      <input type="file" id="fileLoadCircuit" accept=".json,application/json" aria-hidden="true" hidden>
+      <button class="btn" id="btnUndo" title="되돌리기 (Ctrl+Z)">되돌리기</button>
+      <button class="btn danger" id="btnClear">모두 지우기</button>
+    </div>
+  </header>
+
+  <aside class="panel tray" aria-label="도구함">
+    <section>
+      <h2>도구</h2>
+      <div class="tools" id="tools"></div>
+    </section>
+    <section>
+      <h2>표시</h2>
+      <div class="toggles">
+        <label class="sw">전류 흐름 보기<input type="checkbox" id="optFlow" checked></label>
+        <label class="sw">전위(전압) 색상<input type="checkbox" id="optColor" checked></label>
+        <label class="sw">부품 고장 시뮬레이션<input type="checkbox" id="optFaults" checked></label>
+      </div>
+      <div style="margin-top:12px">
+        <div class="legend"></div>
+        <div class="legend-l"><span>0 V</span><span id="legMax">5 V</span></div>
+        <p class="muted" style="font-size:12px;margin:10px 0 0">노란 점은 전류의 방향(+ → −)과 세기를 나타내요. 전자는 반대 방향으로 움직여요.</p>
+      </div>
+    </section>
+    <section>
+      <details class="help">
+        <summary>사용 방법</summary>
+        <ul>
+          <li>도구를 고르고 구멍 두 곳을 차례로 클릭하면 부품이 꽂혀요.</li>
+          <li>같은 세로 줄(a~e 또는 f~j)은 안쪽에서 서로 연결되어 있어요. 구멍에 마우스를 올리면 연결된 줄이 표시됩니다.</li>
+          <li>가운데 홈을 기준으로 위쪽과 아래쪽은 연결되어 있지 않아요.</li>
+          <li>맨 위 두 줄(빨강 +, 파랑 −)은 전원장치와 이어져 있어요. 맨 아래 두 줄은 점퍼선으로 직접 이어서 써요.</li>
+        </ul>
+      </details>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="board-wrap">
+      <svg id="board" viewBox="-206 -12 1012 452" role="img" aria-label="브레드보드 작업 영역" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <div class="statusbar">
+      <div class="hint" id="hint"></div>
+      <div class="hov" id="hov" aria-live="off"></div>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+  </main>
+
+  <aside class="side" aria-label="전원 · 부품 · 측정">
+    <div class="alerts" id="alerts" aria-live="polite"></div>
+
+    <section class="panel card" id="psuCard">
+      <div class="psu-top">
+        <h2>직류 전원장치</h2>
+        <button class="power-sw" id="powerSw" role="switch" aria-checked="true" aria-label="전원 켜기/끄기"><span></span></button>
+      </div>
+      <label class="vin" for="vIn">
+        <input type="text" id="vIn" inputmode="decimal" autocomplete="off" value="5.0" aria-label="출력 전압(볼트)" aria-describedby="vInHelp">
+        <span class="unit">V</span>
+      </label>
+      <p class="muted vin-help" id="vInHelp">숫자를 입력하고 Enter를 누르세요. 0~30 V</p>
+      <div class="stats">
+        <div class="stat"><b>전체 전류</b><span id="sI">0 mA</span></div>
+        <div class="stat"><b>전체 저항</b><span id="sR">—</span></div>
+        <div class="stat"><b>전력</b><span id="sP">0 mW</span></div>
+      </div>
+    </section>
+
+    <section class="panel card">
+      <h2>선택한 부품</h2>
+      <div id="inspector"></div>
+    </section>
+
+    <section class="panel card">
+      <h2>전압 측정</h2>
+      <div id="meterCard"></div>
+    </section>
+
+    <section class="panel card" id="noteCard" hidden>
+      <h2>예제 설명</h2>
+      <div id="noteBody"></div>
+    </section>
+  </aside>
+</div>
+
+<script>
+(function () {
+'use strict';
+/*ENGINE*/
+
+/* ================= 화면 ================= */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const $ = (s, r) => (r || document).querySelector(s);
+const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const G = buildGeometry();
+const H = id => G.holes[id];
+const svg = $('#board');
+
+const TYPE_NAME = { wire: '점퍼선', resistor: '저항', led: 'LED', bulb: '전구', switch: '스위치', ammeter: '전류계' };
+const PREFIX = { wire: 'W', resistor: 'R', led: 'LED', bulb: '전구', switch: 'S', ammeter: 'A' };
+const WIRE_COLORS = { red: '#e0392f', black: '#2c3136', blue: '#2f6fe4', green: '#2faa5c', yellow: '#f2c230', orange: '#f08a24', purple: '#8a55d6', white: '#ecebe4' };
+const WIRE_NAMES = { red: '빨강', black: '검정', blue: '파랑', green: '초록', yellow: '노랑', orange: '주황', purple: '보라', white: '하양' };
+const AUTO_COLORS = ['blue', 'green', 'yellow', 'orange', 'purple'];
+const R_CHIPS = [47, 100, 220, 330, 470, 1000, 4700, 10000];
+const BULB_CHIPS = [10, 20, 40];
+
+const ICONS = {
+  select: '<svg viewBox="0 0 24 24"><path d="M6 3l12 9-5.4 1.2L15.8 20l-2.7 1.1-3.1-6.7L6 18z" fill="currentColor"/></svg>',
+  wire: '<svg viewBox="0 0 24 24"><path d="M4 18c4 0 3-12 8-12s4 12 8 12" fill="none" stroke="#2f6fe4" stroke-width="3" stroke-linecap="round"/><circle cx="4" cy="18" r="2.2" fill="#2f6fe4"/><circle cx="20" cy="18" r="2.2" fill="#2f6fe4"/></svg>',
+  resistor: '<svg viewBox="0 0 24 24"><path d="M1 12h5M18 12h5" stroke="#a9b2b9" stroke-width="2.4" stroke-linecap="round"/><rect x="5.5" y="7.5" width="13" height="9" rx="4" fill="#d9c18f" stroke="rgba(0,0,0,.4)"/><rect x="8.2" y="7.5" width="2" height="9" fill="#d3322b"/><rect x="11.4" y="7.5" width="2" height="9" fill="#d3322b"/><rect x="14.6" y="7.5" width="2" height="9" fill="#7b4a1e"/></svg>',
+  led: '<svg viewBox="0 0 24 24"><path d="M5.5 14V9.5a6.5 6.5 0 0 1 13 0V14z" fill="#ef3b36" stroke="rgba(0,0,0,.4)"/><path d="M3.5 14h17" stroke="rgba(0,0,0,.45)" stroke-width="1.6"/><path d="M9 14.5v7M15 14.5v5" stroke="#a9b2b9" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  bulb: '<svg viewBox="0 0 24 24"><circle cx="12" cy="9.5" r="6.5" fill="rgba(240,200,80,.35)" stroke="currentColor" stroke-width="1.8"/><path d="M9 13l1-4 2 3 2-3 1 4" fill="none" stroke="#c28a1c" stroke-width="1.6" stroke-linejoin="round"/><rect x="9.5" y="16.5" width="5" height="4" rx="1" fill="#9aa3a9" stroke="rgba(0,0,0,.4)"/></svg>',
+  switch: '<svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="9" rx="2.5" fill="#3a4249"/><circle cx="8" cy="12.5" r="1.7" fill="#d2b25c"/><circle cx="16" cy="12.5" r="1.7" fill="#d2b25c"/><path d="M8 12.5L15 7" stroke="#d2b25c" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  ammeter: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><text x="12" y="16.6" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor" font-family="IBM Plex Mono,monospace">A</text></svg>',
+  meter: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><text x="12" y="16.6" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor" font-family="IBM Plex Mono,monospace">V</text></svg>',
+  erase: '<svg viewBox="0 0 24 24"><path d="M5 7h14M9.5 7V4.8h5V7M7 7l.9 12.2h8.2L17 7M10.3 10.5v6M13.7 10.5v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+};
+const TOOLS = [
+  { id: 'select', label: '선택 · 이동' }, { id: 'wire', label: '점퍼선' }, { id: 'resistor', label: '저항' },
+  { id: 'led', label: 'LED' }, { id: 'bulb', label: '전구' }, { id: 'switch', label: '스위치' },
+  { id: 'ammeter', label: '전류계' }, { id: 'meter', label: '전압 측정' }, { id: 'erase', label: '지우개' }
+];
+const PLACE = new Set(['wire', 'resistor', 'led', 'bulb', 'switch', 'ammeter']);
+
+/* ----- 상태 ----- */
+const state = { parts: [], psu: { on: true, V: 5, fuse: false }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true } };
+const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, note: null, drag: null, suppressClick: false, linkNet: null };
+let last = { R: 220, led: 'red' };
+let sim = null;
+const history = [];
+const STORE_KEY = 'breadboard-sim-v1';
+
+const getPart = id => state.parts.find(p => p.id === id);
+const sel = () => ui.selected ? getPart(ui.selected) : null;
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function snapshot() { return JSON.stringify({ parts: state.parts, psu: state.psu, seq: state.seq, counters: state.counters }); }
+function pushHistory(snap) { history.push(snap || snapshot()); if (history.length > 60) history.shift(); }
+function restore(json) {
+  const o = JSON.parse(json);
+  state.parts = o.parts; state.psu = o.psu; state.seq = o.seq; state.counters = o.counters;
+}
+function save() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({ parts: state.parts, psu: state.psu, seq: state.seq, counters: state.counters, settings: state.settings, last }));
+  } catch (e) { /* 저장 불가 환경 */ }
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return false;
+    const o = JSON.parse(raw);
+    if (!o || !Array.isArray(o.parts)) return false;
+    for (const p of o.parts) { if (!H(p.a) || !H(p.b)) return false; }
+    state.parts = o.parts; state.psu = Object.assign({ on: true, V: 5, fuse: false }, o.psu);
+    state.seq = o.seq || 0; state.counters = o.counters || {};
+    Object.assign(state.settings, o.settings || {});
+    Object.assign(last, o.last || {});
+    return true;
+  } catch (e) { return false; }
+}
+
+function autoWireColor(a, b) {
+  const nets = [H(a).net, H(b).net];
+  if (nets.some(n => n === 'RT+' || n === 'RB+')) return 'red';
+  if (nets.some(n => n === 'RT-' || n === 'RB-')) return 'black';
+  const n = state.counters.wire || 0;
+  return AUTO_COLORS[(n - 1) % AUTO_COLORS.length];
+}
+function newPart(type, a, b, extra) {
+  const n = (state.counters[type] = (state.counters[type] || 0) + 1);
+  const p = { id: 'p' + (++state.seq), type, name: PREFIX[type] + n, a, b };
+  if (type === 'resistor') p.R = last.R;
+  if (type === 'led') { p.color = last.led; p.burnt = false; }
+  if (type === 'bulb') { p.R = 20; p.burnt = false; }
+  if (type === 'switch') p.closed = true;
+  if (type === 'wire') p.color = autoWireColor(a, b);
+  return Object.assign(p, extra || {});
+}
+function occupiedBy(holeId, ignore) {
+  for (const p of state.parts) {
+    if (p.a === holeId && !(ignore && ignore.id === p.id && ignore.pin === 'a')) return p;
+    if (p.b === holeId && !(ignore && ignore.id === p.id && ignore.pin === 'b')) return p;
+  }
+  return null;
+}
+
+/* ================= 그리기: 보드 ================= */
+function holeShape(h) { return '<rect class="hole" data-id="' + h.id + '" x="' + (h.x - 4.6) + '" y="' + (h.y - 4.6) + '" width="9.2" height="9.2" rx="2"/>'; }
+const netEls = {}, holeEls = {};
+let gParts, gWires, gOver, gStrips;
+
+function buildBoard() {
+  let s = '<defs></defs>';
+  s += '<rect class="board-body" x="0" y="0" width="792" height="426" rx="16"/>';
+  s += '<rect class="board-groove" x="14" y="203" width="764" height="20" rx="6"/>';
+  // 줄 번호와 열 표시
+  for (let c = 1; c <= COLS; c++) {
+    if (c === 1 || c % 5 === 0) {
+      s += '<text class="blabel" x="' + colX(c) + '" y="82">' + c + '</text>';
+      s += '<text class="blabel" x="' + colX(c) + '" y="350">' + c + '</text>';
+    }
+  }
+  ROW_TOP.forEach((r, i) => { s += '<text class="blabel" x="24" y="' + (Y_TOP[i] + 3.5) + '">' + r + '</text><text class="blabel" x="768" y="' + (Y_TOP[i] + 3.5) + '">' + r + '</text>'; });
+  ROW_BOT.forEach((r, i) => { s += '<text class="blabel" x="24" y="' + (Y_BOT[i] + 3.5) + '">' + r + '</text><text class="blabel" x="768" y="' + (Y_BOT[i] + 3.5) + '">' + r + '</text>'; });
+  // 전원 레일 표시선
+  const lineY = { 'rt+': 17, 'rt-': 67, 'rb-': 359, 'rb+': 409 };
+  RAIL_DEFS.forEach(rd => {
+    const plus = rd.sign === '+';
+    s += '<line class="rail-line" x1="40" x2="752" y1="' + lineY[rd.key] + '" y2="' + lineY[rd.key] + '" style="stroke:var(' + (plus ? '--plus' : '--minus') + ')"/>';
+    s += '<text class="railsign" x="24" y="' + (rd.y + 5) + '" style="fill:var(' + (plus ? '--plus' : '--minus') + ')">' + (plus ? '+' : '−') + '</text>';
+    s += '<text class="railsign" x="768" y="' + (rd.y + 5) + '" style="fill:var(' + (plus ? '--plus' : '--minus') + ')">' + (plus ? '+' : '−') + '</text>';
+  });
+  // 전위 색상 띠
+  s += '<g id="gStrips">';
+  for (let c = 1; c <= COLS; c++) {
+    s += '<rect class="netstrip" data-net="T' + c + '" x="' + (colX(c) - 11) + '" y="' + (Y_TOP[0] - 11) + '" width="22" height="' + (Y_TOP[4] - Y_TOP[0] + 22) + '" rx="7"/>';
+    s += '<rect class="netstrip" data-net="B' + c + '" x="' + (colX(c) - 11) + '" y="' + (Y_BOT[0] - 11) + '" width="22" height="' + (Y_BOT[4] - Y_BOT[0] + 22) + '" rx="7"/>';
+  }
+  RAIL_DEFS.forEach(rd => { s += '<rect class="netstrip" data-net="' + rd.net + '" x="' + (railX(1) - 12) + '" y="' + (rd.y - 10) + '" width="' + (railX(25) - railX(1) + 24) + '" height="20" rx="8"/>'; });
+  s += '</g>';
+  s += '<g id="gHoles">' + G.list.map(holeShape).join('') + '</g>';
+  // 전원장치
+  s += '<g id="gPsu">' +
+    '<path class="cable-out" d="M-50 44C-22 44 -8 30 16 30"/><path class="cable cable-red" d="M-50 44C-22 44 -8 30 16 30"/>' +
+    '<path class="cable-out" d="M-50 76C-22 76 -8 54 16 54"/><path class="cable cable-black" d="M-50 76C-22 76 -8 54 16 54"/>' +
+    '<rect class="psu-box" x="-200" y="8" width="158" height="188" rx="12"/>' +
+    '<text class="psu-title" x="-186" y="30">직류 전원장치</text>' +
+    '<rect class="lcd" x="-186" y="40" width="108" height="62" rx="7"/>' +
+    '<text class="lcd-v" id="psuV" x="-178" y="72">5.0 V</text>' +
+    '<text class="lcd-i" id="psuI" x="-178" y="92">0.000 A</text>' +
+    '<circle class="term" cx="-58" cy="44" r="10" style="fill:var(--plus)"/><text class="term-text" x="-58" y="49">+</text>' +
+    '<circle class="term" cx="-58" cy="76" r="10" style="fill:#2b3035"/><text class="term-text" x="-58" y="80.5">−</text>' +
+    '<circle id="psuLed" cx="-176" cy="122" r="5" style="fill:var(--ok)"/><text class="psu-title" x="-164" y="126" id="psuState">출력 ON</text>' +
+    '<text class="psu-title" x="-186" y="158" style="font-weight:500">위쪽 두 줄 레일에</text><text class="psu-title" x="-186" y="174" style="font-weight:500">연결되어 있어요</text>' +
+    '</g>';
+  s += '<g id="gParts"></g><g id="gWires"></g><g id="gOver"></g>';
+  svg.innerHTML = s;
+  gParts = $('#gParts'); gWires = $('#gWires'); gOver = $('#gOver'); gStrips = $('#gStrips');
+  $$('.netstrip', svg).forEach(el => { netEls[el.dataset.net] = el; });
+  $$('.hole', svg).forEach(el => { holeEls[el.dataset.id] = el; });
+}
+
+/* ================= 그리기: 부품 ================= */
+function geo(p) {
+  const A = H(p.a), B = H(p.b);
+  const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 1;
+  return { A, B, dx, dy, d, ang: Math.atan2(dy, dx) * 180 / Math.PI, mx: (A.x + B.x) / 2, my: (A.y + B.y) / 2 };
+}
+const f1 = x => +x.toFixed(2);
+const xf = g => 'translate(' + f1(g.mx) + ' ' + f1(g.my) + ') rotate(' + f1(g.ang) + ')';
+const hitLine = g => '<line class="hit" x1="' + g.A.x + '" y1="' + g.A.y + '" x2="' + g.B.x + '" y2="' + g.B.y + '"/>';
+const flowLine = g => '<path class="flow" data-role="flow" style="display:none" d="M' + g.A.x + ' ' + g.A.y + 'L' + g.B.x + ' ' + g.B.y + '"/>';
+const tipDots = g => '<circle class="tip" cx="' + g.A.x + '" cy="' + g.A.y + '" r="3.4"/><circle class="tip" cx="' + g.B.x + '" cy="' + g.B.y + '" r="3.4"/>';
+const legsLocal = (g, half) => '<line class="leg" x1="' + f1(-g.d / 2) + '" y1="0" x2="' + f1(-half) + '" y2="0"/><line class="leg" x1="' + f1(half) + '" y1="0" x2="' + f1(g.d / 2) + '" y2="0"/>';
+function labelAt(g, text, off) {
+  off = off || 15;
+  if (Math.abs(g.dx) >= Math.abs(g.dy)) return '<text class="plabel" data-role="label" x="' + f1(g.mx) + '" y="' + f1(g.my - off) + '">' + esc(text) + '</text>';
+  return '<text class="plabel" data-role="label" style="text-anchor:start" x="' + f1(g.mx + off - 2) + '" y="' + f1(g.my + 3.5) + '">' + esc(text) + '</text>';
+}
+
+function wirePath(p, g) {
+  const nx = -g.dy / g.d, ny = g.dx / g.d;
+  const sgn = (parseInt(String(p.id).replace(/\D/g, ''), 10) || 0) % 2 ? 1 : -1;
+  const bend = Math.min(34, 8 + g.d * 0.16) * sgn;
+  const cx = g.mx + nx * bend * 2, cy = g.my + ny * bend * 2;
+  return 'M' + g.A.x + ' ' + g.A.y + 'Q' + f1(cx) + ' ' + f1(cy) + ' ' + g.B.x + ' ' + g.B.y;
+}
+
+function partMarkup(p) {
+  const g = geo(p);
+  switch (p.type) {
+    case 'wire': {
+      const d = wirePath(p, g);
+      const c = WIRE_COLORS[p.color] || WIRE_COLORS.blue;
+      return '<path class="hit" d="' + d + '"/><path class="wire-out" d="' + d + '"/><path class="wire-col" d="' + d + '" style="stroke:' + c + '"/>' +
+        '<path class="flow" data-role="flow" style="display:none" d="' + d + '"/>' +
+        '<circle class="wire-end" cx="' + g.A.x + '" cy="' + g.A.y + '" r="5.2" style="fill:' + c + '"/><circle class="wire-end" cx="' + g.B.x + '" cy="' + g.B.y + '" r="5.2" style="fill:' + c + '"/>';
+    }
+    case 'resistor': {
+      const bl = clamp(g.d - 14, 16, 40);
+      const bands = resistorBands(p.R);
+      const bx = [-bl * 0.30, -bl * 0.12, bl * 0.06, bl * 0.30];
+      let s = hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, bl / 2 - 1) + '</g>' + flowLine(g) + '<g transform="' + xf(g) + '">' +
+        '<rect class="res-body" data-role="body" x="' + f1(-bl / 2) + '" y="-6.5" width="' + f1(bl) + '" height="13" rx="5"/>';
+      bands.forEach((c, i) => { s += '<rect x="' + f1(bx[i] - 1.6) + '" y="-6.5" width="3.2" height="13" style="fill:' + c + '"/>'; });
+      return s + '</g>' + tipDots(g) + labelAt(g, fmtR(p.R));
+    }
+    case 'led': {
+      const t = LED_TYPES[p.color] || LED_TYPES.red;
+      const gid = 'glow-' + p.id;
+      const dir = { x: g.dx / g.d, y: g.dy / g.d };
+      const mxp = g.A.x + dir.x * Math.min(15, g.d * 0.28) + (-dir.y) * -10, myp = g.A.y + dir.y * Math.min(15, g.d * 0.28) + dir.x * -10;
+      return '<defs><radialGradient id="' + gid + '"><stop offset="0" stop-color="' + t.css + '" stop-opacity=".95"/><stop offset=".45" stop-color="' + t.css + '" stop-opacity=".45"/><stop offset="1" stop-color="' + t.css + '" stop-opacity="0"/></radialGradient></defs>' +
+        hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, 6) + '</g>' + flowLine(g) +
+        '<g transform="' + xf(g) + '">' +
+        '<path class="led-rim" d="M7 -11 L7 11 L10.5 11 L10.5 -11 Z" transform="translate(-2 0)"/>' +
+        '<path class="led-dome" data-role="dome" d="M6 -6.7 A9 9 0 1 0 6 6.7 Z" style="fill:' + t.css + ';fill-opacity:.4" transform="translate(-1 0)"/>' +
+        '<ellipse class="led-shine" cx="-4" cy="-3.4" rx="3.2" ry="1.9" transform="rotate(-35 -4 -3.4)"/>' +
+        '<path class="crack" d="M-5 -5 L-1 -1 L-4 2 L1 5"/></g>' +
+        tipDots(g) +
+        '<circle data-role="glow" cx="' + f1(g.mx) + '" cy="' + f1(g.my) + '" r="40" style="fill:url(#' + gid + ');opacity:0;pointer-events:none"/>' +
+        '<text class="pmark" x="' + f1(mxp) + '" y="' + f1(myp + 3) + '">+</text>' +
+        labelAt(g, p.name, 20);
+    }
+    case 'bulb': {
+      const gid = 'glow-' + p.id;
+      return '<defs><radialGradient id="' + gid + '"><stop offset="0" stop-color="#ffe9a0" stop-opacity=".95"/><stop offset=".4" stop-color="#ffc94a" stop-opacity=".5"/><stop offset="1" stop-color="#ffb02e" stop-opacity="0"/></radialGradient></defs>' +
+        hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, 8) + '</g>' + flowLine(g) +
+        '<g transform="' + xf(g) + '">' +
+        '<circle class="bulb-glass" data-role="glass" r="11"/>' +
+        '<path class="bulb-fil" data-role="fil" d="M-6 5 L-6 0 L-3 -5 L0 0 L3 -5 L6 0 L6 5"/>' +
+        '<rect class="bulb-base" x="-4.5" y="9" width="9" height="4" rx="1.2"/></g>' +
+        tipDots(g) +
+        '<circle data-role="glow" cx="' + f1(g.mx) + '" cy="' + f1(g.my) + '" r="52" style="fill:url(#' + gid + ');opacity:0;pointer-events:none"/>' +
+        labelAt(g, p.name + ' · ' + fmtR(p.R), 21);
+    }
+    case 'switch': {
+      const lever = p.closed ? '<line class="sw-lever" x1="-9" y1="0" x2="9" y2="0"/>' : '<line class="sw-lever" x1="-9" y1="0" x2="7" y2="-10"/>';
+      return hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, 15) + '</g>' + flowLine(g) + '<g transform="' + xf(g) + '">' +
+        '<rect class="sw-body" x="-15" y="-10" width="30" height="20" rx="4"/><circle class="sw-contact" cx="-9" cy="0" r="2.6"/><circle class="sw-contact" cx="9" cy="0" r="2.6"/>' + lever + '</g>' +
+        tipDots(g) + labelAt(g, p.name + (p.closed ? ' 닫힘' : ' 열림'), 18);
+    }
+    case 'ammeter': {
+      return hitLine(g) +
+        '<line class="leg" x1="' + g.A.x + '" y1="' + g.A.y + '" x2="' + f1(g.mx) + '" y2="' + f1(g.my) + '"/><line class="leg" x1="' + g.B.x + '" y1="' + g.B.y + '" x2="' + f1(g.mx) + '" y2="' + f1(g.my) + '"/>' + flowLine(g) +
+        tipDots(g) +
+        '<rect class="amm-body" x="' + f1(g.mx - 30) + '" y="' + f1(g.my - 12) + '" width="60" height="24" rx="6"/>' +
+        '<text class="amm-text" data-role="amm" x="' + f1(g.mx) + '" y="' + f1(g.my + 4) + '">0 mA</text>' +
+        '<circle cx="' + f1(g.A.x + (g.B.x - g.A.x) * 0.12) + '" cy="' + f1(g.A.y + (g.B.y - g.A.y) * 0.12) + '" r="3" style="fill:#e0392f"/>' +
+        labelAt(g, p.name, 22);
+    }
+  }
+  return '';
+}
+
+const ctls = new Map();
+function createCtl(p) {
+  const el = document.createElementNS(SVGNS, 'g');
+  el.setAttribute('class', 'part part-' + p.type);
+  el.dataset.id = p.id;
+  el.innerHTML = partMarkup(p);
+  const q = r => el.querySelector('[data-role="' + r + '"]');
+  return { el, flow: q('flow'), glow: q('glow'), dome: q('dome'), fil: q('fil'), glass: q('glass'), amm: q('amm'), body: q('body') };
+}
+const sigOf = p => [p.type, p.a, p.b, p.R, p.color, p.closed ? 1 : 0, p.name].join('|');
+
+function ledBrightness(i) { return i < 1e-5 ? 0 : clamp(Math.pow(i / 0.02, 0.6), 0, 1.15); }
+function bulbBrightness(pw) { return pw < 1e-4 ? 0 : clamp(Math.pow(pw / E.BULB_RATED_P, 0.65), 0, 1.2); }
+function mixHex(c1, c2, t) {
+  const a = [1, 3, 5].map(i => parseInt(c1.substr(i, 2), 16)), b = [1, 3, 5].map(i => parseInt(c2.substr(i, 2), 16));
+  return 'rgb(' + a.map((v, i) => Math.round(v + (b[i] - v) * t)).join(',') + ')';
+}
+
+function updatePartDyn(c, p, r) {
+  r = r || { v: 0, i: 0, p: 0, same: true };
+  const I = r.i;
+  if (c.flow) {
+    const show = state.settings.flow && Math.abs(I) > 5e-6 && !r.same && !p.burnt;
+    c.flow.style.display = show ? '' : 'none';
+    if (show) {
+      const sp = Math.min(150, 14 + 42 * Math.log10(1 + Math.abs(I) / 0.002));
+      c.flow.style.setProperty('--dur', (11 / sp).toFixed(3) + 's');
+      c.flow.style.animationDirection = I >= 0 ? 'normal' : 'reverse';
+    }
+  }
+  let hot = false;
+  if (p.type === 'led' && !p.burnt) {
+    const b = ledBrightness(I);
+    if (c.glow) c.glow.style.opacity = (b * 0.95).toFixed(3);
+    if (c.dome) c.dome.style.fillOpacity = (0.38 + 0.62 * Math.min(1, b)).toFixed(3);
+    hot = I > 0.03;
+  } else if (p.type === 'led') {
+    if (c.glow) c.glow.style.opacity = 0;
+  }
+  if (p.type === 'bulb') {
+    const b = p.burnt ? 0 : bulbBrightness(Math.abs(r.p));
+    if (c.glow) c.glow.style.opacity = clamp(b, 0, 1).toFixed(3);
+    if (c.fil && !p.burnt) c.fil.style.stroke = mixHex('#8d7a55', '#fff0b0', clamp(b, 0, 1));
+    if (c.glass) c.glass.style.fill = 'rgba(' + Math.round(190 + 65 * clamp(b, 0, 1)) + ',' + Math.round(215 + 30 * clamp(b, 0, 1)) + ',' + Math.round(235 - 90 * clamp(b, 0, 1)) + ',' + (0.3 + 0.35 * clamp(b, 0, 1)).toFixed(2) + ')';
+  }
+  if (p.type === 'resistor') hot = Math.abs(r.p) > E.RES_RATING;
+  if (p.type === 'ammeter' && c.amm) c.amm.textContent = fmtI(I);
+  c.el.classList.toggle('hot', hot);
+  c.el.classList.toggle('burnt', !!p.burnt);
+}
+
+function syncParts() {
+  const seen = new Set();
+  state.parts.forEach(p => {
+    seen.add(p.id);
+    const s = sigOf(p);
+    let c = ctls.get(p.id);
+    if (!c || c.sig !== s) {
+      if (c) c.el.remove();
+      c = createCtl(p); c.sig = s; ctls.set(p.id, c);
+      (p.type === 'wire' ? gWires : gParts).appendChild(c.el);
+    }
+    updatePartDyn(c, p, sim.parts[p.id]);
+  });
+  for (const [id, c] of Array.from(ctls)) if (!seen.has(id)) { c.el.remove(); ctls.delete(id); }
+}
+
+/* ----- 전위 색상 ----- */
+const STOPS = [[0, [47, 111, 228]], [0.34, [31, 163, 163]], [0.67, [233, 176, 32]], [1, [224, 69, 47]]];
+function voltColor(v, vmax) {
+  const t = clamp(v / vmax, 0, 1);
+  for (let i = 1; i < STOPS.length; i++) {
+    if (t <= STOPS[i][0]) {
+      const [t0, c0] = STOPS[i - 1], [t1, c1] = STOPS[i], k = (t - t0) / (t1 - t0);
+      return 'rgb(' + c0.map((x, j) => Math.round(x + (c1[j] - x) * k)).join(',') + ')';
+    }
+  }
+  return 'rgb(' + STOPS[3][1].join(',') + ')';
+}
+function usedNets() {
+  const s = new Set();
+  for (const p of state.parts) { s.add(H(p.a).net); s.add(H(p.b).net); }
+  return s;
+}
+function updateNets() {
+  const vmax = Math.max(state.psu.V, 1);
+  const used = usedNets();
+  if (sim.supply.on) { used.add('RT+'); }
+  used.add('RT-');
+  for (const net in netEls) {
+    const el = netEls[net];
+    const show = state.settings.color && used.has(net) && (net in sim.V);
+    el.style.opacity = show ? 0.55 : 0;
+    if (show) el.style.fill = voltColor(sim.V[net], vmax);
+  }
+  $('#legMax').textContent = trimNum(vmax) + ' V';
+}
+function netVolt(net) { return net in sim.V ? sim.V[net] : null; }
+
+/* ----- 전원장치 ----- */
+function updatePSU() {
+  const on = state.psu.on && !state.psu.fuse;
+  const I = sim.supply.I;
+  $('#psuV').textContent = on ? state.psu.V.toFixed(1) + ' V' : '--.- V';
+  $('#psuV').classList.toggle('lcd-off', !on);
+  $('#psuI').textContent = (Math.abs(I) < 10 ? I.toFixed(3) : I.toFixed(1)) + ' A';
+  $('#psuLed').style.fill = on ? 'var(--ok)' : (state.psu.fuse ? 'var(--bad)' : 'var(--muted)');
+  $('#psuState').textContent = state.psu.fuse ? '보호 차단' : (on ? '출력 ON' : '출력 OFF');
+  if (document.activeElement !== $('#vIn')) $('#vIn').value = fmtVin(state.psu.V);
+  const sw = $('#powerSw');
+  sw.setAttribute('aria-checked', state.psu.on ? 'true' : 'false');
+  $('#sI').textContent = fmtI(I);
+  $('#sP').textContent = fmtP(sim.supply.P);
+  $('#sR').textContent = on && Math.abs(I) > 1e-7 ? fmtR(sim.supply.V / I) : (on ? '∞ (끊김)' : '—');
+}
+
+/* ================= 오버레이 ================= */
+function drawOverlay() {
+  let s = '';
+  const p = sel();
+  if (p && ui.tool === 'select') {
+    const g = geo(p);
+    s += p.type === 'wire' ? '<path class="sel-line" d="' + wirePath(p, g) + '"/>' : '<line class="sel-line" x1="' + g.A.x + '" y1="' + g.A.y + '" x2="' + g.B.x + '" y2="' + g.B.y + '"/>';
+    s += '<circle class="handle" data-pin="a" cx="' + g.A.x + '" cy="' + g.A.y + '" r="8.5"/><circle class="handle" data-pin="b" cx="' + g.B.x + '" cy="' + g.B.y + '" r="8.5"/>';
+  }
+  if (PLACE.has(ui.tool) && ui.pending) {
+    const h = H(ui.pending);
+    s += '<circle class="pend-pulse" cx="' + h.x + '" cy="' + h.y + '" r="13"/><circle class="pend" cx="' + h.x + '" cy="' + h.y + '" r="8"/>';
+    if (ui.hover && ui.hover !== ui.pending && !occupiedBy(ui.hover)) {
+      const tmp = { id: 'p0', type: ui.tool, name: PREFIX[ui.tool], a: ui.pending, b: ui.hover, R: last.R, color: ui.tool === 'wire' ? autoWireColor(ui.pending, ui.hover) : last.led, closed: true };
+      if (ui.tool === 'bulb') tmp.R = 20;
+      s += '<g class="ghost">' + partMarkup(tmp) + '</g>';
+    }
+  }
+  if (ui.hover && (PLACE.has(ui.tool) || ui.tool === 'meter')) {
+    const h = H(ui.hover);
+    s += '<circle class="hover-ring" cx="' + h.x + '" cy="' + h.y + '" r="9"/>';
+  }
+  const m = ui.meter;
+  if (m.a) {
+    const ha = H(m.a);
+    if (m.b) {
+      const hb = H(m.b);
+      const v = (netVolt(ha.net) || 0) - (netVolt(hb.net) || 0);
+      const mx = (ha.x + hb.x) / 2, my = (ha.y + hb.y) / 2;
+      s += '<path class="probe-line" d="M' + ha.x + ' ' + ha.y + 'L' + hb.x + ' ' + hb.y + '"/>';
+      const txt = fmtV(v), w = txt.length * 8.6 + 18;
+      s += '<g><rect class="read-box" x="' + f1(mx - w / 2) + '" y="' + f1(my - 14) + '" width="' + f1(w) + '" height="26" rx="7"/><text class="read-text" x="' + f1(mx) + '" y="' + f1(my + 4.5) + '">' + txt + '</text></g>';
+      s += '<g><circle class="probe-black probe-ring" cx="' + hb.x + '" cy="' + hb.y + '" r="8"/><text class="probe-text" x="' + hb.x + '" y="' + (hb.y + 3.5) + '">−</text></g>';
+    }
+    s += '<g><circle class="probe-red probe-ring" cx="' + ha.x + '" cy="' + ha.y + '" r="8"/><text class="probe-text" x="' + ha.x + '" y="' + (ha.y + 3.5) + '">+</text></g>';
+  }
+  gOver.innerHTML = s;
+}
+
+/* ================= 오른쪽 패널 ================= */
+function renderInspector() {
+  const box = $('#inspector');
+  const p = sel();
+  if (!p) {
+    box.innerHTML = '<p class="muted" style="margin:0">부품을 선택하면 저항값 같은 속성을 바꾸고, 부품에 걸리는 <b>전압</b>·<b>전류</b>·<b>전력</b>을 볼 수 있어요.</p>';
+    return;
+  }
+  let h = '<div class="insp-head"><span class="tag">' + TYPE_NAME[p.type] + '</span><strong>' + esc(p.name) + '</strong><button class="btn small danger" data-act="del" title="삭제 (Delete)">삭제</button></div>';
+  if (p.type === 'resistor') {
+    h += '<div class="field"><span class="lab">저항값</span><div class="numin"><input type="number" id="inpR" min="0.1" step="any" value="' + p.R + '" aria-label="저항값(옴)"><span class="muted">Ω</span></div><div class="chips" id="rChips">' +
+      R_CHIPS.map(v => '<button class="chip" data-act="setR" data-v="' + v + '" aria-pressed="' + (v === p.R) + '">' + fmtR(v) + '</button>').join('') + '</div></div>';
+  } else if (p.type === 'bulb') {
+    h += '<div class="field"><span class="lab">필라멘트 저항 (정격 6 V)</span><div class="chips">' +
+      BULB_CHIPS.map(v => '<button class="chip" data-act="setBulbR" data-v="' + v + '" aria-pressed="' + (v === p.R) + '">' + v + ' Ω</button>').join('') + '</div></div>';
+  } else if (p.type === 'led') {
+    h += '<div class="field"><span class="lab">색깔</span><div class="sw-colors">' +
+      Object.keys(LED_TYPES).map(k => '<button class="cdot" data-act="setLed" data-v="' + k + '" title="' + LED_TYPES[k].name + ' (약 ' + LED_TYPES[k].vf + ' V)" aria-label="' + LED_TYPES[k].name + '" aria-pressed="' + (p.color === k) + '" style="background:' + LED_TYPES[k].css + '"></button>').join('') +
+      '</div></div><div class="field"><button class="btn small" data-act="flip">극성 바꾸기 (+ ↔ −)</button></div>';
+  } else if (p.type === 'wire') {
+    h += '<div class="field"><span class="lab">색깔</span><div class="sw-colors">' +
+      Object.keys(WIRE_COLORS).map(k => '<button class="cdot" data-act="setWire" data-v="' + k + '" title="' + WIRE_NAMES[k] + '" aria-label="' + WIRE_NAMES[k] + '" aria-pressed="' + (p.color === k) + '" style="background:' + WIRE_COLORS[k] + '"></button>').join('') + '</div></div>';
+  } else if (p.type === 'switch') {
+    h += '<div class="field"><button class="btn primary" data-act="toggleSw" id="btnSw">' + (p.closed ? '스위치 열기 (회로 끊기)' : '스위치 닫기 (회로 잇기)') + '</button></div>';
+  } else if (p.type === 'ammeter') {
+    h += '<div class="field"><button class="btn small" data-act="flip">극성 바꾸기 (+ ↔ −)</button></div>';
+  }
+  h += '<dl class="meas"><div><dt>전압 V</dt><dd data-m="v">–</dd></div><div><dt>전류 I</dt><dd data-m="i">–</dd></div><div><dt>전력 P</dt><dd data-m="p">–</dd></div></dl>';
+  h += '<div class="formula" data-m="formula"></div><div data-m="warn"></div>';
+  h += '<p class="muted" style="margin:10px 0 0;font-size:12px">꽂힌 위치 ' + p.a + ' → ' + p.b + '</p>';
+  box.innerHTML = h;
+}
+
+function updateInspectorNumbers() {
+  const p = sel();
+  if (!p) return;
+  const r = sim.parts[p.id] || { v: 0, i: 0, p: 0, same: true };
+  const set = (k, t) => { const el = $('[data-m="' + k + '"]', $('#inspector')); if (el) el.textContent = t; };
+  set('v', fmtV(r.v)); set('i', fmtI(r.i)); set('p', fmtP(r.p));
+  const f = $('[data-m="formula"]', $('#inspector'));
+  let fh = '', wh = '';
+  if (p.type === 'resistor' || (p.type === 'bulb' && !p.burnt)) {
+    fh = '옴의 법칙 <b>V = I × R</b><span class="eq">' + fmtV(Math.abs(r.v)) + ' = ' + fmtI(Math.abs(r.i)) + ' × ' + fmtR(p.R) + '</span>';
+  } else if (p.type === 'led') {
+    const t = LED_TYPES[p.color];
+    fh = p.burnt ? '고장난 LED는 전류가 흐르지 않아요.' : 'LED는 약 <b>' + t.vf + ' V</b> 이상이 걸려야 켜지고, 켜진 뒤에는 전압이 거의 일정해요. 그래서 전류를 제한하는 <b>저항</b>이 꼭 필요해요.';
+  } else if (p.type === 'wire') {
+    fh = '점퍼선은 저항이 거의 0이라 두 끝의 전위가 같아요.';
+  } else if (p.type === 'switch') {
+    fh = p.closed ? '닫힌 스위치는 도선처럼 전류가 흘러요.' : '열린 스위치는 회로를 끊어 전류가 흐르지 않아요.';
+  } else if (p.type === 'ammeter') {
+    fh = '전류계는 회로에 <b>직렬</b>로 끼워서 써요. 저항이 거의 없어 전원에 바로 병렬로 연결하면 합선돼요.';
+  }
+  if (f) f.innerHTML = fh;
+  if (r.same) wh += '<div class="callout warn">양쪽 다리가 같은 줄에 꽂혀 있어요. 이 부품은 건너뛰어(단락) 아무 일도 하지 않아요.</div>';
+  if (p.burnt) wh += '<div class="callout bad">고장났어요. 원인을 고친 뒤 교체하세요.<br><button class="btn small" data-act="fix">부품 교체</button></div>';
+  else if (p.type === 'resistor' && Math.abs(r.p) > E.RES_RATING) wh += '<div class="callout warn">정격 전력(1/4 W)을 넘었어요. 실제로는 저항이 뜨거워져요.</div>';
+  else if (p.type === 'led' && r.i > 0.03) wh += '<div class="callout warn">LED 전류가 커요. 50 mA를 넘으면 고장납니다.</div>';
+  else if (p.type === 'bulb' && Math.abs(r.v) > 7) wh += '<div class="callout warn">전구 정격 전압(6 V)을 넘었어요. 너무 높으면 필라멘트가 끊어져요.</div>';
+  const w = $('[data-m="warn"]', $('#inspector'));
+  if (w && w.dataset.h !== wh) { w.dataset.h = wh; w.innerHTML = wh; }
+}
+
+function updateAlerts() {
+  let h = '';
+  if (state.psu.fuse) {
+    h += '<div class="callout bad"><b>과전류! 전원이 차단됐어요.</b><br>합선(단락)이거나 저항이 너무 작은 회로일 수 있어요. 회로를 고친 뒤 복구하세요.<br><button class="btn small" data-act="fuse">전원 복구</button></div>';
+  }
+  state.parts.filter(p => p.burnt).forEach(p => {
+    h += '<div class="callout bad"><b>' + esc(p.name) + '</b>이(가) 고장났어요.<br><button class="btn small" data-act="fixId" data-id="' + p.id + '">교체하기</button></div>';
+  });
+  if (!state.psu.fuse && state.parts.length) {
+    if (!state.psu.on) h += '<div class="callout info">전원이 꺼져 있어요. 오른쪽 위 스위치를 켜 보세요.</div>';
+    else if (Math.abs(sim.supply.I) < 1e-7) h += '<div class="callout info">전류가 흐르지 않아요. 회로가 끊겨 있거나, 스위치가 열려 있거나, 전원 레일과 이어지지 않았을 수 있어요.</div>';
+  }
+  const box = $('#alerts');
+  if (box.dataset.h !== h) { box.dataset.h = h; box.innerHTML = h; }
+}
+
+function updateMeterCard() {
+  const m = ui.meter, box = $('#meterCard');
+  let h;
+  const nv = id => { const v = netVolt(H(id).net); return v === null ? 0 : v; };
+  if (!m.a) {
+    h = '<p class="muted" style="margin:0">도구함에서 <b>전압 측정</b>을 고른 뒤, 빨간 프로브와 검정 프로브를 꽂을 구멍을 차례로 클릭하세요.</p>';
+  } else if (!m.b) {
+    h = '<p style="margin:0">빨간 프로브: <b>' + holeLabel(H(m.a)) + '</b> (전원 − 기준 ' + fmtV(nv(m.a)) + ')<br><span class="muted">이제 검정 프로브 구멍을 클릭하세요.</span></p>';
+  } else {
+    const v = nv(m.a) - nv(m.b);
+    h = '<div class="meter-read">' + fmtV(v) + '</div><div class="muted" style="font-size:12.5px">빨강 ' + holeLabel(H(m.a)) + ' − 검정 ' + holeLabel(H(m.b)) + '</div><div style="margin-top:8px"><button class="btn small" data-act="clearMeter">측정 지우기</button></div>';
+  }
+  if (box.dataset.h !== h) { box.dataset.h = h; box.innerHTML = h; }
+}
+
+function updateNoteCard() {
+  const c = $('#noteCard');
+  if (!ui.note) { c.hidden = true; return; }
+  c.hidden = false;
+  $('#noteBody').innerHTML = '<div class="noteTitle">' + esc(ui.note.name) + '</div><div>' + esc(ui.note.text) + '</div><div style="margin-top:8px"><button class="btn small" data-act="closeNote">닫기</button></div>';
+}
+
+function hintText() {
+  const t = ui.tool;
+  if (t === 'select') return '부품을 클릭하면 값과 전압·전류가 나와요. 스위치는 눌러서 켜고 끌 수 있고, 선택한 부품 끝의 ○를 끌어 옮길 수 있어요.';
+  if (t === 'erase') return '지울 부품을 클릭하세요.';
+  if (t === 'meter') return ui.meter.a && !ui.meter.b ? '검정 프로브를 꽂을 두 번째 구멍을 클릭하세요.' : '빨간 프로브를 꽂을 구멍을 클릭하세요. 두 지점 사이의 전압을 재요.';
+  if (!ui.pending) return t === 'led' ? 'LED: 양극(+, 긴 다리) 구멍을 먼저 클릭하세요.' : TYPE_NAME[t] + ': 첫 번째 구멍을 클릭하세요.';
+  return t === 'led' ? '음극(−) 구멍을 클릭하세요. (Esc: 취소)' : '두 번째 구멍을 클릭하세요. (Esc: 취소)';
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+/* ================= 갱신 ================= */
+function refresh(structural) {
+  const out = simulate(state.parts, state.psu, G, { faults: state.settings.faults });
+  sim = out.res;
+  out.events.forEach(ev => {
+    if (ev.type === 'burnt') toast(ev.part.name + ' 고장: ' + ev.why);
+    if (ev.type === 'fuse') toast('과전류로 전원이 차단됐어요. 합선인지 확인해 보세요.');
+  });
+  syncParts();
+  updateNets();
+  updatePSU();
+  drawOverlay();
+  updateAlerts();
+  updateMeterCard();
+  updateNoteCard();
+  if (structural) renderInspector();
+  updateInspectorNumbers();
+  $('#hint').textContent = hintText();
+  updateHover();
+  save();
+}
+
+function setTool(id) {
+  ui.tool = id; ui.pending = null;
+  $$('.tool').forEach(b => b.setAttribute('aria-pressed', b.dataset.tool === id ? 'true' : 'false'));
+  svg.setAttribute('class', 'tool-' + id + (PLACE.has(id) ? ' placing' : '') + (state.settings.flow ? '' : ' no-flow'));
+  if (id !== 'select') { /* 선택은 유지하되 핸들은 숨김 */ }
+  refresh(false);
+}
+
+function select(id) { ui.selected = id; refresh(true); }
+function deletePart(id) {
+  pushHistory();
+  state.parts = state.parts.filter(p => p.id !== id);
+  if (ui.selected === id) ui.selected = null;
+  refresh(true);
+}
+function undo() {
+  if (!history.length) { toast('되돌릴 작업이 없어요.'); return; }
+  restore(history.pop());
+  ui.selected = null; ui.pending = null;
+  refresh(true);
+}
+function loadPreset(id) {
+  const pr = PRESETS.find(x => x.id === id);
+  if (!pr) return;
+  pushHistory();
+  state.parts = []; state.counters = {}; state.seq = 0;
+  pr.parts.forEach(d => {
+    const extra = Object.assign({}, d); delete extra.type; delete extra.a; delete extra.b;
+    state.parts.push(newPart(d.type, d.a, d.b, extra));
+  });
+  state.psu = { on: true, V: pr.V, fuse: false };
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null };
+  ui.note = { name: pr.name, text: pr.note };
+  refresh(true);
+}
+function clearAll() {
+  pushHistory();
+  state.parts = []; state.counters = {}; state.seq = 0; state.psu.fuse = false;
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.note = null;
+  refresh(true);
+}
+
+/* ----- 회로 저장 · 불러오기 (JSON 파일) ----- */
+const CIRCUIT_FORMAT = 'breadboard-sim-circuit';
+function exportCircuit() {
+  if (!state.parts.length) { toast('저장할 회로가 없어요. 부품을 먼저 배치해 주세요.'); return; }
+  const data = {
+    format: CIRCUIT_FORMAT, version: 1, savedAt: new Date().toISOString(),
+    psu: { V: state.psu.V },
+    parts: state.parts.map(p => {
+      const d = { type: p.type, a: p.a, b: p.b };
+      if (p.type === 'resistor') d.R = p.R;
+      if (p.type === 'bulb') { d.R = p.R; d.burnt = !!p.burnt; }
+      if (p.type === 'led') { d.color = p.color; d.burnt = !!p.burnt; }
+      if (p.type === 'switch') d.closed = !!p.closed;
+      if (p.type === 'wire') d.color = p.color;
+      return d;
+    })
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+  a.href = url; a.download = '브레드보드-회로_' + ts + '.json';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast('회로를 JSON 파일로 저장했어요.');
+}
+function importCircuit(text) {
+  let o;
+  try { o = JSON.parse(text); } catch (e) { toast('JSON 파일을 읽을 수 없어요. 형식을 확인해 주세요.'); return; }
+  if (!o || typeof o !== 'object' || !Array.isArray(o.parts)) { toast('올바른 회로 파일이 아니에요.'); return; }
+  pushHistory();
+  state.parts = []; state.counters = {}; state.seq = 0;
+  let skipped = 0;
+  o.parts.forEach(d => {
+    if (!d || !PREFIX[d.type] || !H(d.a) || !H(d.b) || d.a === d.b || occupiedBy(d.a) || occupiedBy(d.b)) { skipped++; return; }
+    const extra = {};
+    if (d.type === 'resistor') extra.R = (+d.R > 0) ? +d.R : 220;
+    if (d.type === 'bulb') { extra.R = (+d.R > 0) ? +d.R : 20; extra.burnt = !!d.burnt; }
+    if (d.type === 'led') { extra.color = LED_TYPES[d.color] ? d.color : 'red'; extra.burnt = !!d.burnt; }
+    if (d.type === 'switch') extra.closed = d.closed !== false;
+    if (d.type === 'wire') extra.color = WIRE_COLORS[d.color] ? d.color : autoWireColor(d.a, d.b);
+    state.parts.push(newPart(d.type, d.a, d.b, extra));
+  });
+  const v = o.psu && +o.psu.V;
+  state.psu = { on: true, V: (v >= 0 && v <= V_MAX) ? v : 5, fuse: false };
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.note = null;
+  refresh(true);
+  toast(!state.parts.length ? '불러올 부품이 없어요.' : skipped ? '회로를 불러왔어요. (겹치거나 잘못된 부품 ' + skipped + '개는 제외)' : '회로를 불러왔어요.');
+}
+
+/* ================= 입력 ================= */
+function svgPoint(e) {
+  const pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY;
+  const m = svg.getScreenCTM();
+  return m ? pt.matrixTransform(m.inverse()) : { x: 0, y: 0 };
+}
+function nearestHole(pt, r) {
+  r = r || 13;
+  let best = null, bd = r * r;
+  for (const h of G.list) {
+    const dx = h.x - pt.x, dy = h.y - pt.y, d = dx * dx + dy * dy;
+    if (d < bd) { bd = d; best = h; }
+  }
+  return best;
+}
+function updateHover() {
+  const hv = $('#hov');
+  const prev = ui.linkNet;
+  const net = ui.hover ? H(ui.hover).net : null;
+  if (prev !== net) {
+    if (prev) G.nets[prev].forEach(id => holeEls[id].classList.remove('link'));
+    if (net) G.nets[net].forEach(id => holeEls[id].classList.add('link'));
+    ui.linkNet = net;
+  }
+  if (!ui.hover) { hv.textContent = ''; return; }
+  const h = H(ui.hover), v = netVolt(h.net);
+  hv.textContent = holeLabel(h) + ' · ' + (v === null ? '연결된 부품 없음' : fmtV(v));
+}
+
+function onHover(e) {
+  const hole = nearestHole(svgPoint(e), 12);
+  const id = hole ? hole.id : null;
+  if (ui.drag) {
+    const d = ui.drag, p = getPart(d.id);
+    if (hole) {
+      const other = d.pin === 'a' ? p.b : p.a;
+      if (hole.id !== other && !occupiedBy(hole.id, { id: p.id, pin: d.pin })) { p[d.pin] = hole.id; }
+    }
+    ui.hover = id;
+    refresh(false);
+    return;
+  }
+  if (id !== ui.hover) {
+    ui.hover = id;
+    drawOverlay();
+    updateHover();
+  }
+}
+
+svg.addEventListener('pointermove', onHover);
+svg.addEventListener('pointerleave', () => { if (!ui.drag) { ui.hover = null; drawOverlay(); updateHover(); } });
+svg.addEventListener('pointerdown', e => {
+  const hd = e.target.closest ? e.target.closest('.handle') : null;
+  if (!hd) { ui.suppressClick = false; return; }
+  const p = sel();
+  if (!p) return;
+  ui.drag = { id: p.id, pin: hd.dataset.pin, orig: p[hd.dataset.pin], snap: snapshot() };
+  try { svg.setPointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
+  e.preventDefault();
+});
+function endDrag(e) {
+  if (!ui.drag) return;
+  const d = ui.drag, p = getPart(d.id);
+  ui.drag = null;
+  ui.suppressClick = true;
+  try { svg.releasePointerCapture(e.pointerId); } catch (err) { /* 무시 */ }
+  if (p && p[d.pin] !== d.orig) pushHistory(d.snap);
+  refresh(true);
+}
+svg.addEventListener('pointerup', endDrag);
+svg.addEventListener('pointercancel', endDrag);
+
+svg.addEventListener('click', e => {
+  if (ui.suppressClick) { ui.suppressClick = false; return; }
+  const t = ui.tool;
+  const hole = nearestHole(svgPoint(e), 13);
+  if (t === 'select' || t === 'erase') {
+    const el = e.target.closest ? e.target.closest('.part') : null;
+    if (el) {
+      const p = getPart(el.dataset.id);
+      if (!p) return;
+      if (t === 'erase') { deletePart(p.id); return; }
+      if (p.type === 'switch') { p.closed = !p.closed; }
+      ui.selected = p.id; refresh(true);
+      return;
+    }
+    if (t === 'select' && ui.selected) select(null);
+    return;
+  }
+  if (!hole) return;
+  if (t === 'meter') {
+    if (!ui.meter.a || ui.meter.b) ui.meter = { a: hole.id, b: null };
+    else if (hole.id !== ui.meter.a) ui.meter.b = hole.id;
+    refresh(false);
+    return;
+  }
+  if (PLACE.has(t)) {
+    const occ = occupiedBy(hole.id);
+    if (occ) { toast('이미 ' + occ.name + '이(가) 꽂혀 있는 구멍이에요. 다른 구멍을 골라 주세요.'); return; }
+    if (!ui.pending) { ui.pending = hole.id; refresh(false); return; }
+    if (ui.pending === hole.id) { ui.pending = null; refresh(false); return; }
+    pushHistory();
+    const p = newPart(t, ui.pending, hole.id);
+    state.parts.push(p);
+    ui.pending = null; ui.selected = p.id;
+    refresh(true);
+  }
+});
+
+document.addEventListener('keydown', e => {
+  const tag = e.target && e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') { if (e.key === 'Escape') e.target.blur(); return; }
+  if (e.key === 'Escape') {
+    if (ui.pending) { ui.pending = null; refresh(false); }
+    else if (ui.meter.a) { ui.meter = { a: null, b: null }; refresh(false); }
+    else if (ui.tool !== 'select') setTool('select');
+    else if (ui.selected) select(null);
+  } else if ((e.key === 'Delete' || e.key === 'Backspace') && ui.selected) {
+    e.preventDefault(); deletePart(ui.selected);
+  } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault(); undo();
+  } else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    setTool(TOOLS[+e.key - 1].id);
+  }
+});
+
+/* ----- 오른쪽 패널 이벤트 ----- */
+function mutate(fn) { const p = sel(); if (!p) return; pushHistory(); fn(p); refresh(true); }
+document.addEventListener('click', e => {
+  const b = e.target.closest ? e.target.closest('[data-act]') : null;
+  if (!b) return;
+  const act = b.dataset.act, v = b.dataset.v;
+  switch (act) {
+    case 'del': if (ui.selected) deletePart(ui.selected); break;
+    case 'setR': mutate(p => { p.R = +v; last.R = +v; }); break;
+    case 'setBulbR': mutate(p => { p.R = +v; }); break;
+    case 'setLed': mutate(p => { p.color = v; last.led = v; }); break;
+    case 'setWire': mutate(p => { p.color = v; }); break;
+    case 'flip': mutate(p => { const t = p.a; p.a = p.b; p.b = t; }); break;
+    case 'toggleSw': { const p = sel(); if (p) { p.closed = !p.closed; refresh(true); } break; }
+    case 'fix': mutate(p => { p.burnt = false; }); break;
+    case 'fixId': { const p = getPart(b.dataset.id); if (p) { pushHistory(); p.burnt = false; refresh(true); } break; }
+    case 'fuse': state.psu.fuse = false; refresh(true); break;
+    case 'clearMeter': ui.meter = { a: null, b: null }; refresh(false); break;
+    case 'closeNote': ui.note = null; refresh(false); break;
+  }
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'inpR') {
+    const p = sel(), v = parseFloat(e.target.value);
+    if (!p || !(v > 0)) return;
+    p.R = v; last.R = v;
+    $$('#rChips .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.v === v ? 'true' : 'false'));
+    refresh(false);
+  }
+});
+let inpSnap = null;
+document.addEventListener('focusin', e => { if (e.target.id === 'inpR') inpSnap = snapshot(); });
+document.addEventListener('change', e => {
+  if (e.target.id === 'inpR' && inpSnap && inpSnap !== snapshot()) { pushHistory(inpSnap); inpSnap = null; }
+});
+
+const V_MAX = 30;
+function fmtVin(v) { return String(+(+v).toFixed(2)); }
+function parseVin(s) {
+  s = String(s).trim().replace(',', '.').replace(/\s*[vV볼트]+$/, '');
+  if (s === '' || !/^\d*\.?\d+$|^\d+\.$/.test(s)) return NaN;
+  return parseFloat(s);
+}
+function vinHelp(msg, bad) {
+  const h = $('#vInHelp');
+  h.textContent = msg || '숫자를 입력하고 Enter를 누르세요. 0~' + V_MAX + ' V';
+  h.classList.toggle('bad', !!bad);
+  $('.vin').classList.toggle('bad', !!bad);
+}
+const vIn = $('#vIn');
+vIn.addEventListener('input', () => {
+  const v = parseVin(vIn.value);
+  if (isNaN(v)) { vinHelp(vIn.value.trim() === '' ? '' : '숫자만 입력해 주세요. 예: 4.5', vIn.value.trim() !== ''); return; }
+  if (v > V_MAX) { vinHelp('최대 ' + V_MAX + ' V까지 입력할 수 있어요.', true); return; }
+  vinHelp('');
+  state.psu.V = v; refresh(false);
+});
+function commitVin() {
+  const v = parseVin(vIn.value);
+  if (!isNaN(v)) state.psu.V = clamp(v, 0, V_MAX);
+  vIn.value = fmtVin(state.psu.V);
+  vinHelp('');
+  refresh(false);
+}
+vIn.addEventListener('blur', commitVin);
+vIn.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); commitVin(); vIn.select(); }
+  else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    const base = isNaN(parseVin(vIn.value)) ? state.psu.V : parseVin(vIn.value);
+    const step = e.shiftKey ? 1 : 0.1;
+    state.psu.V = clamp(Math.round((base + (e.key === 'ArrowUp' ? step : -step)) * 100) / 100, 0, V_MAX);
+    vIn.value = fmtVin(state.psu.V); vinHelp(''); refresh(false);
+  }
+});
+vIn.addEventListener('focus', () => vIn.select());
+$('#powerSw').addEventListener('click', () => { state.psu.on = !state.psu.on; refresh(false); });
+$('#btnUndo').addEventListener('click', undo);
+let clearTimer = 0;
+$('#btnClear').addEventListener('click', e => {
+  const b = e.currentTarget;
+  if (b.dataset.armed) { clearTimeout(clearTimer); delete b.dataset.armed; b.textContent = '모두 지우기'; clearAll(); return; }
+  b.dataset.armed = '1'; b.textContent = '한 번 더 누르면 지워요';
+  clearTimer = setTimeout(() => { delete b.dataset.armed; b.textContent = '모두 지우기'; }, 3000);
+});
+const presetSel = $('#presetSel');
+presetSel.innerHTML = '<option value="">예제 회로 불러오기</option>' + PRESETS.map(p => '<option value="' + p.id + '">' + esc(p.name) + '</option>').join('');
+presetSel.addEventListener('change', () => { if (presetSel.value) { loadPreset(presetSel.value); presetSel.value = ''; presetSel.blur(); } });
+
+$('#btnSaveCircuit').addEventListener('click', exportCircuit);
+const fileLoadCircuit = $('#fileLoadCircuit');
+$('#btnLoadCircuit').addEventListener('click', () => fileLoadCircuit.click());
+fileLoadCircuit.addEventListener('change', () => {
+  const f = fileLoadCircuit.files && fileLoadCircuit.files[0];
+  fileLoadCircuit.value = '';
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => importCircuit(String(reader.result || ''));
+  reader.onerror = () => toast('파일을 읽는 중 문제가 생겼어요.');
+  reader.readAsText(f);
+});
+
+$('#tools').innerHTML = TOOLS.map((t, i) => '<button class="tool" data-tool="' + t.id + '" aria-pressed="false">' + ICONS[t.id] + '<span>' + t.label + '</span><kbd>' + (i + 1) + '</kbd></button>').join('');
+$('#tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if (b) setTool(b.dataset.tool); });
+
+function bindOpt(id, key) {
+  const el = $('#' + id);
+  el.checked = !!state.settings[key];
+  el.addEventListener('change', () => { state.settings[key] = el.checked; svg.classList.toggle('no-flow', !state.settings.flow); refresh(false); });
+}
+
+/* ================= 시작 ================= */
+buildBoard();
+if (!load()) {
+  loadPreset('led');
+  history.length = 0;
+}
+bindOpt('optFlow', 'flow'); bindOpt('optColor', 'color'); bindOpt('optFaults', 'faults');
+setTool('select');
+refresh(true);
+})();
+</script>

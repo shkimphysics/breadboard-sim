@@ -1,0 +1,11 @@
+{
+  "name": "breadboard-sim",
+  "private": true,
+  "scripts": {
+    "build": "node build.js",
+    "test:engine": "node tests/test-engine.js",
+    "test:ui": "node tests/smoke.js",
+    "test": "npm run build && npm run test:engine && npm run test:ui"
+  },
+  "devDependencies": { "jsdom": "^24.0.0" }
+}
