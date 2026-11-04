@@ -210,6 +210,8 @@ svg.placing,svg.tool-meter{cursor:crosshair}
 .sw-lever{stroke:#d2b25c;stroke-width:4;stroke-linecap:round}
 .amm-body{fill:#222a30;stroke:rgba(0,0,0,.6);stroke-width:1.2}
 .amm-text{fill:#6dffa8;font:600 11.5px var(--mono);text-anchor:middle}
+.cap-plate{fill:#6b8fb0;stroke:rgba(0,0,0,.4);stroke-width:1}
+.ind-coil{fill:none;stroke:#c28a1c;stroke-width:2.4;stroke-linecap:round}
 .plabel{font:600 10.5px var(--mono);fill:var(--fg);paint-order:stroke;stroke:var(--board);stroke-width:3.2px;stroke-linejoin:round;text-anchor:middle;pointer-events:none}
 .pmark{font:700 10px var(--mono);fill:var(--plus);paint-order:stroke;stroke:var(--board);stroke-width:2.4px;text-anchor:middle;pointer-events:none}
 .part.burnt .led-dome{fill:#38332f!important;fill-opacity:1!important}
@@ -282,8 +284,8 @@ svg.no-flow .flow{display:none}
         <label class="sw">전류 흐름 보기<input type="checkbox" id="optFlow" checked></label>
         <label class="sw">전위(전압) 색상<input type="checkbox" id="optColor" checked></label>
         <label class="sw">부품 고장 시뮬레이션<input type="checkbox" id="optFaults" checked></label>
-        <label class="sw">저항 이름 표시<input type="checkbox" id="optResName" checked></label>
-        <label class="sw">저항 값(Ω) 표시<input type="checkbox" id="optResValue" checked></label>
+        <label class="sw">부품 이름 표시<input type="checkbox" id="optResName" checked></label>
+        <label class="sw">부품 값 표시<input type="checkbox" id="optResValue" checked></label>
       </div>
       <div style="margin-top:12px">
         <div class="legend"></div>
@@ -411,6 +413,17 @@ function fmtP(p) {
   if (a < 1) { const m = p * 1000, am = Math.abs(m); return m.toFixed(am < 10 ? 2 : am < 100 ? 1 : 0) + ' mW'; }
   return p.toFixed(a < 100 ? 2 : 0) + ' W';
 }
+function fmtC(v) {
+  if (v >= 1e-3) return trimNum(v * 1e3) + ' mF';
+  if (v >= 1e-6) return trimNum(v * 1e6) + ' µF';
+  if (v >= 1e-9) return trimNum(v * 1e9) + ' nF';
+  return trimNum(v * 1e12) + ' pF';
+}
+function fmtL(v) {
+  if (v >= 1) return trimNum(v) + ' H';
+  if (v >= 1e-3) return trimNum(v * 1e3) + ' mH';
+  return trimNum(v * 1e6) + ' µH';
+}
 
 /* ----- 저항 색띠 ----- */
 const BAND_COL = ['#1c1c1c', '#7b4a1e', '#d3322b', '#ee7b1c', '#f1d21d', '#2f9d4b', '#2b5fd6', '#8b44b8', '#8a8f94', '#f3f3ef'];
@@ -501,6 +514,7 @@ function solveCircuit(parts, psu, G) {
     else if (p.type === 'bulb') { if (!p.burnt) g = 1 / Math.max(p.R, 1e-3); }
     else if (p.type === 'switch') { if (p.closed) g = 1 / E.R_SWITCH; }
     else if (p.type === 'ammeter') g = 1 / E.R_AMM;
+    else if (p.type === 'inductor') g = 1 / E.R_WIRE;
     if (g > 0) rs.push({ p, ia, ib, g });
     if (p.type === 'led' && !p.burnt) ds.push(Object.assign({ p, ia, ib }, ledParams(p)));
   }
@@ -555,6 +569,7 @@ function solveCircuit(parts, psu, G) {
       else if (p.type === 'bulb') i = p.burnt ? 0 : v / Math.max(p.R, 1e-3);
       else if (p.type === 'switch') i = p.closed ? v / E.R_SWITCH : 0;
       else if (p.type === 'ammeter') i = v / E.R_AMM;
+      else if (p.type === 'inductor') i = v / E.R_WIRE;
       else if (p.type === 'led') {
         if (!p.burnt) { const d = ledParams(p); i = d.Is * (Math.exp(Math.min(v / d.nVt, 90)) - 1); }
       }
@@ -704,6 +719,19 @@ const PRESETS = [
       { type: 'resistor', R: 150, a: 'e16', b: 'e12' },
       { type: 'resistor', R: 180, a: 'a12', b: 'a21' },
       { type: 'wire', a: 'a21', b: 'rt-:18' }]
+  },
+  {
+    id: 'rc-rl-dc', name: '축전기·인덕터의 직류 특성', V: 10,
+    note: '직류에서 축전기는 다 충전되면 전류를 막아요(개방회로) — 위쪽 가지는 전류가 거의 0이고, 전원전압 10V가 전부 축전기에 걸려요. 인덕터는 저항이 거의 없는 도선처럼 동작해요 — 아래쪽 가지는 마치 저항만 있는 것처럼 전류가 V÷R = 10V÷1kΩ = 10mA 흘러요.',
+    parts: [
+      { type: 'wire', a: 'rt+:1', b: 'a2' },
+      { type: 'resistor', R: 1000, a: 'b2', b: 'b7' },
+      { type: 'capacitor', C: 100e-6, a: 'c7', b: 'c11' },
+      { type: 'wire', a: 'a11', b: 'rt-:9' },
+      { type: 'wire', a: 'rt+:3', b: 'd2' },
+      { type: 'resistor', R: 1000, a: 'e2', b: 'e16' },
+      { type: 'inductor', L: 10e-3, a: 'a16', b: 'a20' },
+      { type: 'wire', a: 'b20', b: 'rt-:14' }]
   }
 ];
 
@@ -716,13 +744,15 @@ const G = buildGeometry();
 const H = id => G.holes[id];
 const svg = $('#board');
 
-const TYPE_NAME = { wire: '점퍼선', resistor: '저항', led: 'LED', bulb: '전구', switch: '스위치', ammeter: '전류계' };
-const PREFIX = { wire: 'W', resistor: 'R', led: 'LED', bulb: '전구', switch: 'S', ammeter: 'A' };
+const TYPE_NAME = { wire: '점퍼선', resistor: '저항', led: 'LED', bulb: '전구', switch: '스위치', ammeter: '전류계', capacitor: '축전기', inductor: '인덕터' };
+const PREFIX = { wire: 'W', resistor: 'R', led: 'LED', bulb: '전구', switch: 'S', ammeter: 'A', capacitor: 'C', inductor: 'L' };
 const WIRE_COLORS = { red: '#e0392f', black: '#2c3136', blue: '#2f6fe4', green: '#2faa5c', yellow: '#f2c230', orange: '#f08a24', purple: '#8a55d6', white: '#ecebe4' };
 const WIRE_NAMES = { red: '빨강', black: '검정', blue: '파랑', green: '초록', yellow: '노랑', orange: '주황', purple: '보라', white: '하양' };
 const AUTO_COLORS = ['blue', 'green', 'yellow', 'orange', 'purple'];
 const R_CHIPS = [47, 100, 220, 330, 470, 1000, 4700, 10000];
 const BULB_CHIPS = [10, 20, 40];
+const C_CHIPS = [1e-6, 10e-6, 100e-6, 220e-6, 470e-6, 1000e-6];
+const L_CHIPS = [1e-3, 10e-3, 47e-3, 100e-3, 220e-3];
 
 const ICONS = {
   select: '<svg viewBox="0 0 24 24"><path d="M6 3l12 9-5.4 1.2L15.8 20l-2.7 1.1-3.1-6.7L6 18z" fill="currentColor"/></svg>',
@@ -733,19 +763,22 @@ const ICONS = {
   switch: '<svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="9" rx="2.5" fill="#3a4249"/><circle cx="8" cy="12.5" r="1.7" fill="#d2b25c"/><circle cx="16" cy="12.5" r="1.7" fill="#d2b25c"/><path d="M8 12.5L15 7" stroke="#d2b25c" stroke-width="2.4" stroke-linecap="round"/></svg>',
   ammeter: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><text x="12" y="16.6" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor" font-family="IBM Plex Mono,monospace">A</text></svg>',
   meter: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><text x="12" y="16.6" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor" font-family="IBM Plex Mono,monospace">V</text></svg>',
+  capacitor: '<svg viewBox="0 0 24 24"><path d="M1 12h7M16 12h7" stroke="#a9b2b9" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="5" width="2.6" height="14" rx="1" fill="#6b8fb0" stroke="rgba(0,0,0,.4)"/><rect x="13.4" y="5" width="2.6" height="14" rx="1" fill="#6b8fb0" stroke="rgba(0,0,0,.4)"/></svg>',
+  inductor: '<svg viewBox="0 0 24 24"><path d="M1 12h3M19 12h4" stroke="#a9b2b9" stroke-width="2.4" stroke-linecap="round"/><path d="M4 12a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0" fill="none" stroke="#c28a1c" stroke-width="2.2" stroke-linecap="round"/></svg>',
   erase: '<svg viewBox="0 0 24 24"><path d="M5 7h14M9.5 7V4.8h5V7M7 7l.9 12.2h8.2L17 7M10.3 10.5v6M13.7 10.5v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 const TOOLS = [
   { id: 'select', label: '선택 · 이동' }, { id: 'wire', label: '점퍼선' }, { id: 'resistor', label: '저항' },
   { id: 'led', label: 'LED' }, { id: 'bulb', label: '전구' }, { id: 'switch', label: '스위치' },
-  { id: 'ammeter', label: '전류계' }, { id: 'meter', label: '전압 측정' }, { id: 'erase', label: '지우개' }
+  { id: 'ammeter', label: '전류계' }, { id: 'capacitor', label: '축전기' }, { id: 'inductor', label: '인덕터' },
+  { id: 'meter', label: '전압 측정' }, { id: 'erase', label: '지우개' }
 ];
-const PLACE = new Set(['wire', 'resistor', 'led', 'bulb', 'switch', 'ammeter']);
+const PLACE = new Set(['wire', 'resistor', 'led', 'bulb', 'switch', 'ammeter', 'capacitor', 'inductor']);
 
 /* ----- 상태 ----- */
 const state = { parts: [], psu: { on: true, V: 5, fuse: false }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true, resName: true, resValue: true } };
 const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, note: null, drag: null, suppressClick: false, linkNet: null };
-let last = { R: 220, led: 'red' };
+let last = { R: 220, led: 'red', C: 100e-6, L: 10e-3 };
 let sim = null;
 const history = [];
 const STORE_KEY = 'breadboard-sim-v1';
@@ -796,6 +829,8 @@ function newPart(type, a, b, extra) {
   if (type === 'bulb') { p.R = 20; p.burnt = false; }
   if (type === 'switch') p.closed = true;
   if (type === 'wire') p.color = autoWireColor(a, b);
+  if (type === 'capacitor') p.C = last.C;
+  if (type === 'inductor') p.L = last.L;
   return Object.assign(p, extra || {});
 }
 function occupiedBy(holeId, ignore) {
@@ -879,6 +914,11 @@ function labelAt(g, text, off) {
   if (Math.abs(g.dx) >= Math.abs(g.dy)) return '<text class="plabel" data-role="label" x="' + f1(g.mx) + '" y="' + f1(g.my - off) + '">' + esc(text) + '</text>';
   return '<text class="plabel" data-role="label" style="text-anchor:start" x="' + f1(g.mx + off - 2) + '" y="' + f1(g.my + 3.5) + '">' + esc(text) + '</text>';
 }
+function partLabel(g, p, valueText) {
+  const showN = state.settings.resName, showV = state.settings.resValue;
+  const lab = showN && showV ? p.name + ' · ' + valueText : showN ? p.name : showV ? valueText : '';
+  return lab ? labelAt(g, lab) : '';
+}
 
 function wirePath(p, g) {
   const nx = -g.dy / g.d, ny = g.dx / g.d;
@@ -906,9 +946,7 @@ function partMarkup(p) {
         '<rect class="res-body" data-role="body" x="' + f1(-bl / 2) + '" y="-6.5" width="' + f1(bl) + '" height="13" rx="5"/>';
       bands.forEach((c, i) => { s += '<rect x="' + f1(bx[i] - 1.6) + '" y="-6.5" width="3.2" height="13" style="fill:' + c + '"/>'; });
       s += '</g>' + tipDots(g);
-      const showN = state.settings.resName, showV = state.settings.resValue;
-      const lab = showN && showV ? p.name + ' · ' + fmtR(p.R) : showN ? p.name : showV ? fmtR(p.R) : '';
-      return s + (lab ? labelAt(g, lab) : '');
+      return s + partLabel(g, p, fmtR(p.R));
     }
     case 'led': {
       const t = LED_TYPES[p.color] || LED_TYPES.red;
@@ -954,6 +992,21 @@ function partMarkup(p) {
         '<circle cx="' + f1(g.A.x + (g.B.x - g.A.x) * 0.12) + '" cy="' + f1(g.A.y + (g.B.y - g.A.y) * 0.12) + '" r="3" style="fill:#e0392f"/>' +
         labelAt(g, p.name, 22);
     }
+    case 'capacitor': {
+      let s = hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, 10) + '</g>' + flowLine(g) +
+        '<g transform="' + xf(g) + '">' +
+        '<rect class="cap-plate" data-role="body" x="-5.3" y="-9" width="2.8" height="18" rx="1"/>' +
+        '<rect class="cap-plate" x="2.5" y="-9" width="2.8" height="18" rx="1"/>' +
+        '</g>' + tipDots(g);
+      return s + partLabel(g, p, fmtC(p.C));
+    }
+    case 'inductor': {
+      let s = hitLine(g) + '<g transform="' + xf(g) + '">' + legsLocal(g, 14) + '</g>' + flowLine(g) +
+        '<g transform="' + xf(g) + '">' +
+        '<path class="ind-coil" data-role="body" d="M-12 0a4 4 0 0 1 8 0 4 4 0 0 1 8 0 4 4 0 0 1 8 0"/>' +
+        '</g>' + tipDots(g);
+      return s + partLabel(g, p, fmtL(p.L));
+    }
   }
   return '';
 }
@@ -967,7 +1020,7 @@ function createCtl(p) {
   const q = r => el.querySelector('[data-role="' + r + '"]');
   return { el, flow: q('flow'), glow: q('glow'), dome: q('dome'), fil: q('fil'), glass: q('glass'), amm: q('amm'), body: q('body') };
 }
-const sigOf = p => [p.type, p.a, p.b, p.R, p.color, p.closed ? 1 : 0, p.name, state.settings.resName ? 1 : 0, state.settings.resValue ? 1 : 0].join('|');
+const sigOf = p => [p.type, p.a, p.b, p.R, p.C, p.L, p.color, p.closed ? 1 : 0, p.name, state.settings.resName ? 1 : 0, state.settings.resValue ? 1 : 0].join('|');
 
 function ledBrightness(i) { return i < 1e-5 ? 0 : clamp(Math.pow(i / 0.02, 0.6), 0, 1.15); }
 function bulbBrightness(pw) { return pw < 1e-4 ? 0 : clamp(Math.pow(pw / E.BULB_RATED_P, 0.65), 0, 1.2); }
@@ -1140,6 +1193,14 @@ function renderInspector() {
     h += '<div class="field"><button class="btn primary" data-act="toggleSw" id="btnSw">' + (p.closed ? '스위치 열기 (회로 끊기)' : '스위치 닫기 (회로 잇기)') + '</button></div>';
   } else if (p.type === 'ammeter') {
     h += '<div class="field"><button class="btn small" data-act="flip">극성 바꾸기 (+ ↔ −)</button></div>';
+  } else if (p.type === 'capacitor') {
+    h += '<div class="field"><span class="lab">이름</span><div class="numin"><input type="text" id="inpName" maxlength="16" value="' + esc(p.name) + '" aria-label="축전기 이름"></div></div>';
+    h += '<div class="field"><span class="lab">정전용량</span><div class="numin"><input type="number" id="inpC" min="0.000001" step="any" value="' + (p.C * 1e6) + '" aria-label="정전용량(마이크로패럿)"><span class="muted">µF</span></div><div class="chips" id="cChips">' +
+      C_CHIPS.map(v => '<button class="chip" data-act="setC" data-v="' + v + '" aria-pressed="' + (v === p.C) + '">' + fmtC(v) + '</button>').join('') + '</div></div>';
+  } else if (p.type === 'inductor') {
+    h += '<div class="field"><span class="lab">이름</span><div class="numin"><input type="text" id="inpName" maxlength="16" value="' + esc(p.name) + '" aria-label="인덕터 이름"></div></div>';
+    h += '<div class="field"><span class="lab">인덕턴스</span><div class="numin"><input type="number" id="inpL" min="0.001" step="any" value="' + (p.L * 1e3) + '" aria-label="인덕턴스(밀리헨리)"><span class="muted">mH</span></div><div class="chips" id="lChips">' +
+      L_CHIPS.map(v => '<button class="chip" data-act="setL" data-v="' + v + '" aria-pressed="' + (v === p.L) + '">' + fmtL(v) + '</button>').join('') + '</div></div>';
   }
   h += '<dl class="meas"><div><dt>전압 V</dt><dd data-m="v">–</dd></div><div><dt>전류 I</dt><dd data-m="i">–</dd></div><div><dt>전력 P</dt><dd data-m="p">–</dd></div></dl>';
   h += '<div class="formula" data-m="formula"></div><div data-m="warn"></div>';
@@ -1166,6 +1227,10 @@ function updateInspectorNumbers() {
     fh = p.closed ? '닫힌 스위치는 도선처럼 전류가 흘러요.' : '열린 스위치는 회로를 끊어 전류가 흐르지 않아요.';
   } else if (p.type === 'ammeter') {
     fh = '전류계는 회로에 <b>직렬</b>로 끼워서 써요. 저항이 거의 없어 전원에 바로 병렬로 연결하면 합선돼요.';
+  } else if (p.type === 'capacitor') {
+    fh = '직류(DC)에서 축전기는 다 충전되고 나면 더 이상 전류가 흐르지 않아요 — <b>개방회로</b>처럼 동작해요. 전하 <b>Q = C × V</b>' + '<span class="eq">' + fmtC(p.C) + ' × ' + fmtV(Math.abs(r.v)) + '</span>';
+  } else if (p.type === 'inductor') {
+    fh = '직류(DC)에서 인덕터는 저항이 거의 없는 <b>도선</b>처럼 동작해요. 전류가 일정하게 유지되는 동안은 걸리는 전압도 거의 0이에요.';
   }
   if (f) f.innerHTML = fh;
   if (r.same) wh += '<div class="callout warn">양쪽 다리가 같은 줄에 꽂혀 있어요. 이 부품은 건너뛰어(단락) 아무 일도 하지 않아요.</div>';
@@ -1304,12 +1369,14 @@ function exportCircuit() {
     format: CIRCUIT_FORMAT, version: 1, savedAt: new Date().toISOString(),
     psu: { V: state.psu.V },
     parts: state.parts.map(p => {
-      const d = { type: p.type, a: p.a, b: p.b };
+      const d = { type: p.type, a: p.a, b: p.b, name: p.name };
       if (p.type === 'resistor') d.R = p.R;
       if (p.type === 'bulb') { d.R = p.R; d.burnt = !!p.burnt; }
       if (p.type === 'led') { d.color = p.color; d.burnt = !!p.burnt; }
       if (p.type === 'switch') d.closed = !!p.closed;
       if (p.type === 'wire') d.color = p.color;
+      if (p.type === 'capacitor') d.C = p.C;
+      if (p.type === 'inductor') d.L = p.L;
       return d;
     })
   };
@@ -1337,6 +1404,9 @@ function importCircuit(text) {
     if (d.type === 'led') { extra.color = LED_TYPES[d.color] ? d.color : 'red'; extra.burnt = !!d.burnt; }
     if (d.type === 'switch') extra.closed = d.closed !== false;
     if (d.type === 'wire') extra.color = WIRE_COLORS[d.color] ? d.color : autoWireColor(d.a, d.b);
+    if (d.type === 'capacitor') extra.C = (+d.C > 0) ? +d.C : 100e-6;
+    if (d.type === 'inductor') extra.L = (+d.L > 0) ? +d.L : 10e-3;
+    if (typeof d.name === 'string' && d.name.trim()) extra.name = d.name.trim().slice(0, 16);
     state.parts.push(newPart(d.type, d.a, d.b, extra));
   });
   const v = o.psu && +o.psu.V;
@@ -1467,8 +1537,9 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); deletePart(ui.selected);
   } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
     e.preventDefault(); undo();
-  } else if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
-    setTool(TOOLS[+e.key - 1].id);
+  } else if (/^[0-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const idx = e.key === '0' ? 9 : +e.key - 1;
+    if (TOOLS[idx]) setTool(TOOLS[idx].id);
   }
 });
 
@@ -1482,6 +1553,8 @@ document.addEventListener('click', e => {
     case 'del': if (ui.selected) deletePart(ui.selected); break;
     case 'setR': mutate(p => { p.R = +v; last.R = +v; }); break;
     case 'setBulbR': mutate(p => { p.R = +v; }); break;
+    case 'setC': mutate(p => { p.C = +v; last.C = +v; }); break;
+    case 'setL': mutate(p => { p.L = +v; last.L = +v; }); break;
     case 'setLed': mutate(p => { p.color = v; last.led = v; }); break;
     case 'setWire': mutate(p => { p.color = v; }); break;
     case 'flip': mutate(p => { const t = p.a; p.a = p.b; p.b = t; }); break;
@@ -1505,12 +1578,25 @@ document.addEventListener('input', e => {
     if (!p || !v) return;
     p.name = v.slice(0, 16);
     refresh(false);
+  } else if (e.target.id === 'inpC') {
+    const p = sel(), v = parseFloat(e.target.value);
+    if (!p || !(v > 0)) return;
+    p.C = v * 1e-6; last.C = p.C;
+    $$('#cChips .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.v === p.C ? 'true' : 'false'));
+    refresh(false);
+  } else if (e.target.id === 'inpL') {
+    const p = sel(), v = parseFloat(e.target.value);
+    if (!p || !(v > 0)) return;
+    p.L = v * 1e-3; last.L = p.L;
+    $$('#lChips .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.v === p.L ? 'true' : 'false'));
+    refresh(false);
   }
 });
+const VALUE_INPUT_IDS = ['inpR', 'inpName', 'inpC', 'inpL'];
 let inpSnap = null;
-document.addEventListener('focusin', e => { if (e.target.id === 'inpR' || e.target.id === 'inpName') inpSnap = snapshot(); });
+document.addEventListener('focusin', e => { if (VALUE_INPUT_IDS.includes(e.target.id)) inpSnap = snapshot(); });
 document.addEventListener('change', e => {
-  if ((e.target.id === 'inpR' || e.target.id === 'inpName') && inpSnap && inpSnap !== snapshot()) { pushHistory(inpSnap); inpSnap = null; }
+  if (VALUE_INPUT_IDS.includes(e.target.id) && inpSnap && inpSnap !== snapshot()) { pushHistory(inpSnap); inpSnap = null; }
 });
 
 const V_MAX = 30;
@@ -1579,7 +1665,8 @@ fileLoadCircuit.addEventListener('change', () => {
   reader.readAsText(f);
 });
 
-$('#tools').innerHTML = TOOLS.map((t, i) => '<button class="tool" data-tool="' + t.id + '" aria-pressed="false">' + ICONS[t.id] + '<span>' + t.label + '</span><kbd>' + (i + 1) + '</kbd></button>').join('');
+const toolKey = i => i < 9 ? String(i + 1) : i === 9 ? '0' : '';
+$('#tools').innerHTML = TOOLS.map((t, i) => '<button class="tool" data-tool="' + t.id + '" aria-pressed="false">' + ICONS[t.id] + '<span>' + t.label + '</span>' + (toolKey(i) ? '<kbd>' + toolKey(i) + '</kbd>' : '') + '</button>').join('');
 $('#tools').addEventListener('click', e => { const b = e.target.closest('.tool'); if (b) setTool(b.dataset.tool); });
 
 function bindOpt(id, key) {

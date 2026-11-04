@@ -54,6 +54,17 @@ function fmtP(p) {
   if (a < 1) { const m = p * 1000, am = Math.abs(m); return m.toFixed(am < 10 ? 2 : am < 100 ? 1 : 0) + ' mW'; }
   return p.toFixed(a < 100 ? 2 : 0) + ' W';
 }
+function fmtC(v) {
+  if (v >= 1e-3) return trimNum(v * 1e3) + ' mF';
+  if (v >= 1e-6) return trimNum(v * 1e6) + ' µF';
+  if (v >= 1e-9) return trimNum(v * 1e9) + ' nF';
+  return trimNum(v * 1e12) + ' pF';
+}
+function fmtL(v) {
+  if (v >= 1) return trimNum(v) + ' H';
+  if (v >= 1e-3) return trimNum(v * 1e3) + ' mH';
+  return trimNum(v * 1e6) + ' µH';
+}
 
 /* ----- 저항 색띠 ----- */
 const BAND_COL = ['#1c1c1c', '#7b4a1e', '#d3322b', '#ee7b1c', '#f1d21d', '#2f9d4b', '#2b5fd6', '#8b44b8', '#8a8f94', '#f3f3ef'];
@@ -144,6 +155,7 @@ function solveCircuit(parts, psu, G) {
     else if (p.type === 'bulb') { if (!p.burnt) g = 1 / Math.max(p.R, 1e-3); }
     else if (p.type === 'switch') { if (p.closed) g = 1 / E.R_SWITCH; }
     else if (p.type === 'ammeter') g = 1 / E.R_AMM;
+    else if (p.type === 'inductor') g = 1 / E.R_WIRE;
     if (g > 0) rs.push({ p, ia, ib, g });
     if (p.type === 'led' && !p.burnt) ds.push(Object.assign({ p, ia, ib }, ledParams(p)));
   }
@@ -198,6 +210,7 @@ function solveCircuit(parts, psu, G) {
       else if (p.type === 'bulb') i = p.burnt ? 0 : v / Math.max(p.R, 1e-3);
       else if (p.type === 'switch') i = p.closed ? v / E.R_SWITCH : 0;
       else if (p.type === 'ammeter') i = v / E.R_AMM;
+      else if (p.type === 'inductor') i = v / E.R_WIRE;
       else if (p.type === 'led') {
         if (!p.burnt) { const d = ledParams(p); i = d.Is * (Math.exp(Math.min(v / d.nVt, 90)) - 1); }
       }
@@ -347,5 +360,18 @@ const PRESETS = [
       { type: 'resistor', R: 150, a: 'e16', b: 'e12' },
       { type: 'resistor', R: 180, a: 'a12', b: 'a21' },
       { type: 'wire', a: 'a21', b: 'rt-:18' }]
+  },
+  {
+    id: 'rc-rl-dc', name: '축전기·인덕터의 직류 특성', V: 10,
+    note: '직류에서 축전기는 다 충전되면 전류를 막아요(개방회로) — 위쪽 가지는 전류가 거의 0이고, 전원전압 10V가 전부 축전기에 걸려요. 인덕터는 저항이 거의 없는 도선처럼 동작해요 — 아래쪽 가지는 마치 저항만 있는 것처럼 전류가 V÷R = 10V÷1kΩ = 10mA 흘러요.',
+    parts: [
+      { type: 'wire', a: 'rt+:1', b: 'a2' },
+      { type: 'resistor', R: 1000, a: 'b2', b: 'b7' },
+      { type: 'capacitor', C: 100e-6, a: 'c7', b: 'c11' },
+      { type: 'wire', a: 'a11', b: 'rt-:9' },
+      { type: 'wire', a: 'rt+:3', b: 'd2' },
+      { type: 'resistor', R: 1000, a: 'e2', b: 'e16' },
+      { type: 'inductor', L: 10e-3, a: 'a16', b: 'a20' },
+      { type: 'wire', a: 'b20', b: 'rt-:14' }]
   }
 ];

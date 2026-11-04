@@ -72,6 +72,14 @@ check('혼합5 R2 전류(병렬 1kΩ 쪽)', r.res.parts.p3.i, 0.014 * 0.99, 0.01
 check('혼합5 R3 전류(병렬 100+150Ω 쪽)', r.res.parts.p4.i, 0.056 * 0.99, 0.056 * 1.01);
 check('혼합5 R5 전류(직렬, 전체와 동일)', r.res.parts.p6.i, 0.07 * 0.998, 0.07 * 1.002);
 
+r = run('rc-rl-dc');
+check('RC가지 전류(직류=0)', Math.abs(r.res.parts.p2.i), 0, 1e-8);
+check('축전기 전류(직류=0)', Math.abs(r.res.parts.p3.i), 0, 1e-8);
+check('축전기 전압(전원전압 다 걸림)', r.res.parts.p3.v, 9.98, 10.0);
+check('RL가지 전류(=V/R=10mA)', r.res.parts.p6.i, 0.01 * 0.99, 0.01 * 1.01);
+check('인덕터 전류(R2와 동일)', r.res.parts.p7.i, 0.01 * 0.99, 0.01 * 1.01);
+check('인덕터 전압(도선처럼 거의 0)', Math.abs(r.res.parts.p7.v), 0, 1e-3);
+
 r = run('led-burn');
 console.log('LED 고장 이벤트', r.events.map(e => e.type), 'burnt=', r.c.parts[1].burnt, 'fuse=', r.c.psu.fuse);
 if (!r.c.parts[1].burnt) fail++;

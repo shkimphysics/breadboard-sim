@@ -22,7 +22,7 @@ const svg = d.getElementById('board');
 const $ = s => d.querySelector(s), $$ = s => Array.from(d.querySelectorAll(s));
 let fail = 0;
 const ok = (c, m) => { if (!c) { fail++; console.log('FAIL', m); } else console.log('OK  ', m); };
-const geom = { a5: [144, 96], a9: [240, 96], b5: [144, 120], e10: [240, 192], 'rt+:3': [108, 30], 'rt-:8': [252, 54] };
+const geom = { a5: [144, 96], a9: [240, 96], b5: [144, 120], c5: [144, 144], c9: [240, 144], d15: [384, 168], d19: [480, 168], e10: [240, 192], 'rt+:3': [108, 30], 'rt-:8': [252, 54] };
 const ev = (type, x, y, target) => (target || svg).dispatchEvent(new w.MouseEvent(type, { clientX: x, clientY: y, bubbles: true }));
 const click = (x, y, target) => ev('click', x, y, target);
 const text = s => ($(s) || {}).textContent;
@@ -92,6 +92,31 @@ $('#optResName').click();
 ok($('.part-resistor').textContent.trim() === '', '이름도 끄면 라벨 없음: "' + $('.part-resistor').textContent + '"');
 $('#optResName').click(); $('#optResValue').click();
 ok($('.part-resistor').textContent.includes('전류제한저항') && /470/.test($('.part-resistor').textContent), '다시 켜면 이름+값 복원');
+
+// 축전기 배치 및 값 변경
+$('.tool[data-tool=capacitor]').click();
+click(...geom.c5); click(...geom.c9);
+ok($$('.part-capacitor').length === 1, '축전기 1개 배치');
+$('.tool[data-tool=select]').click();
+click(0, 0, $$('.part-capacitor')[0].querySelector('[data-role=body]'));
+ok(text('#inspector').includes('정전용량'), '축전기 인스펙터 표시: ' + text('#inspector').slice(0, 60));
+const capChip = $$('#cChips .chip').find(c => c.dataset.v === String(10e-6));
+capChip.click();
+ok(/10\s*µF/.test($('.part-capacitor').textContent), '축전기 칩으로 10µF 반영: ' + $('.part-capacitor').textContent);
+const inpC = $('#inpC'); inpC.value = '47'; inpC.dispatchEvent(new w.Event('input', { bubbles: true }));
+ok(/47\s*µF/.test($('.part-capacitor').textContent), '축전기 직접 입력 47µF 라벨: ' + $('.part-capacitor').textContent);
+const inpCN = $('#inpName'); inpCN.value = '평활콘덴서'; inpCN.dispatchEvent(new w.Event('input', { bubbles: true }));
+ok($('.part-capacitor').textContent.includes('평활콘덴서'), '축전기 이름 변경: ' + $('.part-capacitor').textContent);
+
+// 인덕터 배치 및 값 변경
+$('.tool[data-tool=inductor]').click();
+click(...geom.d15); click(...geom.d19);
+ok($$('.part-inductor').length === 1, '인덕터 1개 배치');
+$('.tool[data-tool=select]').click();
+click(0, 0, $$('.part-inductor')[0].querySelector('[data-role=body]'));
+ok(text('#inspector').includes('인덕턴스'), '인덕터 인스펙터 표시: ' + text('#inspector').slice(0, 60));
+const inpL = $('#inpL'); inpL.value = '100'; inpL.dispatchEvent(new w.Event('input', { bubbles: true }));
+ok(/100\s*mH/.test($('.part-inductor').textContent), '인덕터 직접 입력 100mH 라벨: ' + $('.part-inductor').textContent);
 
 // 전압 슬라이더
 const vi = $('#vIn'); vi.value = '9'; vi.dispatchEvent(new w.Event('input', { bubbles: true }));
