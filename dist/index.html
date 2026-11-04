@@ -186,9 +186,13 @@ dl.meas dd{margin:0;font:600 15px var(--mono);font-variant-numeric:tabular-nums;
 .lcd-off{fill:#2b5a42}
 .cable-red{stroke:var(--plus)}
 .cable-black{stroke:#2b3035}
+.cable-ch1{stroke:var(--scope-ch1)}
+.cable-ch2{stroke:var(--scope-ch2)}
 .cable{fill:none;stroke-width:5;stroke-linecap:round}
 .cable-out{fill:none;stroke:var(--wire-outline);stroke-width:7.5;stroke-linecap:round}
 .term{stroke:rgba(0,0,0,.4);stroke-width:1.5}
+.scope-mini-grid{stroke:var(--scope-grid);stroke-width:1;opacity:.8}
+.scope-mini-trace{fill:none;stroke-width:1.6;opacity:.95}
 .term-text{fill:#fff;font:700 14px var(--mono);text-anchor:middle}
 .part .hit{fill:none;stroke:rgba(0,0,0,0);stroke-width:22;stroke-linecap:round;pointer-events:none}
 .part .hit.fat{pointer-events:stroke}
@@ -1026,6 +1030,17 @@ function buildBoard() {
     '<circle id="psuLed" cx="-176" cy="122" r="5" style="fill:var(--ok)"/><text class="psu-title" x="-164" y="126" id="psuState">출력 ON</text>' +
     '<text class="psu-title" x="-186" y="158" style="font-weight:500">위쪽 두 줄 레일에</text><text class="psu-title" x="-186" y="174" style="font-weight:500">연결되어 있어요</text>' +
     '</g>';
+  // 오실로스코프 기기
+  s += '<g id="gScope">' +
+    '<rect class="psu-box" x="-200" y="212" width="158" height="112" rx="12"/>' +
+    '<text class="psu-title" x="-186" y="234">오실로스코프</text>' +
+    '<rect class="lcd" x="-186" y="244" width="130" height="64" rx="6"/>' +
+    '<line class="scope-mini-grid" x1="-186" y1="276" x2="-56" y2="276"/>' +
+    '<path class="scope-mini-trace" id="scopeMiniCh1" style="stroke:var(--scope-ch1)" d=""/>' +
+    '<path class="scope-mini-trace" id="scopeMiniCh2" style="stroke:var(--scope-ch2)" d=""/>' +
+    '<circle class="probe-ch1 term" cx="-42" cy="260" r="7"/><text class="term-text" x="-42" y="263.5" style="font-size:11px">1</text>' +
+    '<circle class="probe-ch2 term" cx="-42" cy="292" r="7"/><text class="term-text" x="-42" y="295.5" style="font-size:11px">2</text>' +
+    '</g>';
   s += '<g id="gParts"></g><g id="gWires"></g><g id="gOver"></g>';
   svg.innerHTML = s;
   gParts = $('#gParts'); gWires = $('#gWires'); gOver = $('#gOver'); gStrips = $('#gStrips');
@@ -1331,10 +1346,16 @@ function drawOverlay() {
   const sc = ui.scope;
   if (sc.ch1) {
     const h1 = H(sc.ch1);
+    const mx1 = f1((-42 + h1.x) / 2);
+    const d1 = 'M-42 260C' + mx1 + ' 260 ' + mx1 + ' ' + h1.y + ' ' + h1.x + ' ' + h1.y;
+    s += '<path class="cable-out" d="' + d1 + '"/><path class="cable cable-ch1" d="' + d1 + '"/>';
     s += '<g><circle class="probe-ch1 probe-ring" cx="' + h1.x + '" cy="' + h1.y + '" r="8"/><text class="probe-text" x="' + h1.x + '" y="' + (h1.y + 3.5) + '">1</text></g>';
   }
   if (sc.ch2) {
     const h2 = H(sc.ch2);
+    const mx2 = f1((-42 + h2.x) / 2);
+    const d2 = 'M-42 292C' + mx2 + ' 292 ' + mx2 + ' ' + h2.y + ' ' + h2.x + ' ' + h2.y;
+    s += '<path class="cable-out" d="' + d2 + '"/><path class="cable cable-ch2" d="' + d2 + '"/>';
     s += '<g><circle class="probe-ch2 probe-ring" cx="' + h2.x + '" cy="' + h2.y + '" r="8"/><text class="probe-text" x="' + h2.x + '" y="' + (h2.y + 3.5) + '">2</text></g>';
   }
   gOver.innerHTML = s;
@@ -1492,6 +1513,29 @@ function updateScope() {
   const body = $('#scopeBody');
   const ac = state.psu.mode === 'ac';
   const sc = ui.scope;
+  const freq = state.psu.freq || 1000, w = 2 * Math.PI * freq, win = 2 / freq;
+  const v1 = ac && sc.ch1 ? netVolt(H(sc.ch1).net) : null;
+  const v2 = ac && sc.ch2 ? netVolt(H(sc.ch2).net) : null;
+  const amp1 = v1 ? cabs(v1) : 0, amp2 = v2 ? cabs(v2) : 0;
+  const vmax = Math.max(amp1, amp2, 0.001) * 1.2;
+  // 보드 위 오실로스코프 기기의 작은 화면에도 같은 파형을 그린다
+  const miniX0 = -186, miniY0 = 244, miniW = 130, miniH = 64;
+  const miniPath = vph => {
+    if (!vph) return '';
+    let d = '';
+    const N = 40;
+    for (let k = 0; k <= N; k++) {
+      const t = (k / N) * win;
+      const vt = cabs(vph) * Math.cos(w * t + cphase(vph));
+      const x = miniX0 + (k / N) * miniW, y = miniY0 + miniH / 2 - (vt / vmax) * (miniH / 2 - 4);
+      d += (k === 0 ? 'M' : 'L') + f1(x) + ' ' + f1(y) + ' ';
+    }
+    return d;
+  };
+  const m1 = $('#scopeMiniCh1'), m2 = $('#scopeMiniCh2');
+  if (m1) m1.setAttribute('d', miniPath(v1));
+  if (m2) m2.setAttribute('d', miniPath(v2));
+
   if (!ac) {
     body.innerHTML = '<div class="callout info">교류 모드로 바꾸면 파형을 볼 수 있어요.<br><button class="btn small" data-act="setMode" data-v="ac">교류(AC)로 전환</button></div>';
     return;
@@ -1503,11 +1547,6 @@ function updateScope() {
   body.innerHTML = '<div class="scope-wrap"><canvas id="scopeCanvas"></canvas></div><div class="scope-legend" id="scopeLegend"></div><div style="margin-top:8px"><button class="btn small" data-act="clearScope">측정 지우기</button></div>';
   const canvas = $('#scopeCanvas');
   const ctx = canvas && canvas.getContext && canvas.getContext('2d');
-  const freq = state.psu.freq || 1000, w = 2 * Math.PI * freq, win = 2 / freq;
-  const v1 = sc.ch1 ? netVolt(H(sc.ch1).net) : null;
-  const v2 = sc.ch2 ? netVolt(H(sc.ch2).net) : null;
-  const amp1 = v1 ? cabs(v1) : 0, amp2 = v2 ? cabs(v2) : 0;
-  const vmax = Math.max(amp1, amp2, 0.001) * 1.2;
   if (ctx) {
     const W = canvas.clientWidth || 560, HH = 160;
     canvas.width = W; canvas.height = HH;
