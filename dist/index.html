@@ -322,17 +322,27 @@ svg.no-flow .flow{display:none}
 
     <section class="panel card" id="psuCard">
       <div class="psu-top">
-        <h2>직류 전원장치</h2>
+        <h2 id="psuTitle">직류 전원장치</h2>
         <button class="power-sw" id="powerSw" role="switch" aria-checked="true" aria-label="전원 켜기/끄기"><span></span></button>
+      </div>
+      <div class="chips" id="modeToggle" role="group" aria-label="전원 종류" style="margin-bottom:8px">
+        <button class="chip" data-act="setMode" data-v="dc" aria-pressed="true">직류(DC)</button>
+        <button class="chip" data-act="setMode" data-v="ac" aria-pressed="false">교류(AC)</button>
       </div>
       <label class="vin" for="vIn">
         <input type="text" id="vIn" inputmode="decimal" autocomplete="off" value="5.0" aria-label="출력 전압(볼트)" aria-describedby="vInHelp">
         <span class="unit">V</span>
       </label>
       <p class="muted vin-help" id="vInHelp">숫자를 입력하고 Enter를 누르세요. 0~30 V</p>
+      <div class="field" id="freqRow" hidden>
+        <span class="lab">주파수</span>
+        <div class="numin"><input type="text" id="fIn" inputmode="decimal" autocomplete="off" value="1000" aria-label="주파수(헤르츠)"><span class="muted">Hz</span></div>
+        <p class="muted vin-help" id="fInHelp">숫자를 입력하고 Enter를 누르세요. 1~20000 Hz</p>
+        <div class="chips" id="freqChips"></div>
+      </div>
       <div class="stats">
-        <div class="stat"><b>전체 전류</b><span id="sI">0 mA</span></div>
-        <div class="stat"><b>전체 저항</b><span id="sR">—</span></div>
+        <div class="stat"><b id="sILabel">전체 전류</b><span id="sI">0 mA</span></div>
+        <div class="stat"><b id="sRLabel">전체 저항</b><span id="sR">—</span></div>
         <div class="stat"><b>전력</b><span id="sP">0 mW</span></div>
       </div>
     </section>
@@ -424,6 +434,9 @@ function fmtL(v) {
   if (v >= 1e-3) return trimNum(v * 1e3) + ' mH';
   return trimNum(v * 1e6) + ' µH';
 }
+function fmtPhase(deg) { return (Math.round(deg * 10) / 10).toFixed(1) + '°'; }
+function fmtF(f) { return f >= 1000 ? trimNum(f / 1000) + ' kHz' : trimNum(f) + ' Hz'; }
+const phaseDiffDeg = (vPh, iPh) => { let d = (cphase(vPh) - cphase(iPh)) * 180 / Math.PI; return ((d + 540) % 360) - 180; };
 
 /* ----- 저항 색띠 ----- */
 const BAND_COL = ['#1c1c1c', '#7b4a1e', '#d3322b', '#ee7b1c', '#f1d21d', '#2f9d4b', '#2b5fd6', '#8b44b8', '#8a8f94', '#f3f3ef'];
@@ -485,6 +498,102 @@ function solveLinear(A, z) {
     x[i] = s / A[i][i];
   }
   return x;
+}
+
+/* ===== 교류(위상자) 해석용 최소 복소수 연산 ===== */
+const cx = (re, im) => ({ re, im: im || 0 });
+const cadd = (a, b) => ({ re: a.re + b.re, im: a.im + b.im });
+const csub = (a, b) => ({ re: a.re - b.re, im: a.im - b.im });
+const cmul = (a, b) => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re });
+const cdiv = (a, b) => { const d = b.re * b.re + b.im * b.im || 1e-30; return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }; };
+const cabs = a => Math.hypot(a.re, a.im);
+const cphase = a => Math.atan2(a.im, a.re);
+
+function solveLinearComplex(A, z) {
+  const n = z.length;
+  for (let k = 0; k < n; k++) {
+    let piv = k, best = cabs(A[k][k]);
+    for (let i = k + 1; i < n; i++) { const v = cabs(A[i][k]); if (v > best) { best = v; piv = i; } }
+    if (piv !== k) { [A[k], A[piv]] = [A[piv], A[k]]; [z[k], z[piv]] = [z[piv], z[k]]; }
+    if (cabs(A[k][k]) < 1e-30) A[k][k] = cx(1e-30, 0);
+    for (let i = k + 1; i < n; i++) {
+      const f = cdiv(A[i][k], A[k][k]);
+      if (f.re === 0 && f.im === 0) continue;
+      for (let j = k; j < n; j++) A[i][j] = csub(A[i][j], cmul(f, A[k][j]));
+      z[i] = csub(z[i], cmul(f, z[k]));
+    }
+  }
+  const x = new Array(n).fill(0).map(() => cx(0, 0));
+  for (let i = n - 1; i >= 0; i--) {
+    let s = z[i];
+    for (let j = i + 1; j < n; j++) s = csub(s, cmul(A[i][j], x[j]));
+    x[i] = cdiv(s, A[i][i]);
+  }
+  return x;
+}
+
+/* 한 번 계산(교류, 위상자 — 진폭 기준, 전원 위상 0°). LED는 비선형이라 지원하지 않음(개방 취급). */
+function solveCircuitAC(parts, psu, G, freq) {
+  const w = 2 * Math.PI * (freq || 1000);
+  const idxMap = new Map([[GROUND_NET, -1]]);
+  let n = 0;
+  const idx = net => { if (!idxMap.has(net)) idxMap.set(net, n++); return idxMap.get(net); };
+  const psuOn = !!(psu.on && !psu.fuse);
+  if (psuOn) idx('RT+');
+  const rs = [], info = {};
+  for (const p of parts) {
+    const na = G.holes[p.a].net, nb = G.holes[p.b].net;
+    const ia = idx(na), ib = idx(nb);
+    const same = na === nb;
+    info[p.id] = { same };
+    if (p.type === 'led' || same) continue;
+    let Y = cx(0, 0);
+    if (p.type === 'wire') Y = cx(1 / E.R_WIRE, 0);
+    else if (p.type === 'resistor') Y = cx(1 / Math.max(p.R, 1e-3), 0);
+    else if (p.type === 'bulb') { if (!p.burnt) Y = cx(1 / Math.max(p.R, 1e-3), 0); }
+    else if (p.type === 'switch') { if (p.closed) Y = cx(1 / E.R_SWITCH, 0); }
+    else if (p.type === 'ammeter') Y = cx(1 / E.R_AMM, 0);
+    else if (p.type === 'inductor') Y = cx(0, -1 / (w * Math.max(p.L, 1e-9)));
+    else if (p.type === 'capacitor') Y = cx(0, w * p.C);
+    if (Y.re !== 0 || Y.im !== 0) rs.push({ p, ia, ib, Y });
+  }
+  const N = n;
+  const A = Array.from({ length: N }, () => Array.from({ length: N }, () => cx(0, 0)));
+  const z = Array.from({ length: N }, () => cx(0, 0));
+  const stampG = (i, j, Y) => {
+    if (i >= 0) A[i][i] = cadd(A[i][i], Y);
+    if (j >= 0) A[j][j] = cadd(A[j][j], Y);
+    if (i >= 0 && j >= 0) { A[i][j] = csub(A[i][j], Y); A[j][i] = csub(A[j][i], Y); }
+  };
+  for (let i = 0; i < N; i++) A[i][i] = cadd(A[i][i], cx(E.GMIN, 0));
+  for (const r of rs) stampG(r.ia, r.ib, r.Y);
+  const gInt = 1 / E.R_INT;
+  if (psuOn) { const i = idxMap.get('RT+'); A[i][i] = cadd(A[i][i], cx(gInt, 0)); z[i] = cadd(z[i], cx(psu.V * gInt, 0)); }
+  const V = N ? solveLinearComplex(A, z) : [];
+  const vOf = net => { const i = idxMap.get(net); return i === undefined || i < 0 ? cx(0, 0) : V[i]; };
+  const out = { parts: {}, V: {}, supply: {}, freq: freq || 1000, w, converged: true, iters: 1 };
+  idxMap.forEach((i, net) => { out.V[net] = i < 0 ? cx(0, 0) : V[i]; });
+  for (const p of parts) {
+    const na = G.holes[p.a].net, nb = G.holes[p.b].net;
+    const v = csub(vOf(na), vOf(nb));
+    const same = info[p.id].same;
+    if (p.type === 'led') { out.parts[p.id] = { v, i: cx(0, 0), p: 0, same, unsupported: true }; continue; }
+    let i = cx(0, 0);
+    if (!same) {
+      if (p.type === 'wire') i = cmul(v, cx(1 / E.R_WIRE, 0));
+      else if (p.type === 'resistor') i = cmul(v, cx(1 / Math.max(p.R, 1e-3), 0));
+      else if (p.type === 'bulb') i = p.burnt ? cx(0, 0) : cmul(v, cx(1 / Math.max(p.R, 1e-3), 0));
+      else if (p.type === 'switch') i = p.closed ? cmul(v, cx(1 / E.R_SWITCH, 0)) : cx(0, 0);
+      else if (p.type === 'ammeter') i = cmul(v, cx(1 / E.R_AMM, 0));
+      else if (p.type === 'inductor') i = cmul(v, cx(0, -1 / (w * Math.max(p.L, 1e-9))));
+      else if (p.type === 'capacitor') i = cmul(v, cx(0, w * p.C));
+    }
+    out.parts[p.id] = { v, i, p: 0.5 * (v.re * i.re + v.im * i.im), same };
+  }
+  const vt = vOf('RT+');
+  const isup = psuOn ? cmul(csub(cx(psu.V, 0), vt), cx(gInt, 0)) : cx(0, 0);
+  out.supply = { V: vt, I: isup, P: 0.5 * (vt.re * isup.re + vt.im * isup.im), on: psuOn };
+  return out;
 }
 
 function ledParams(p) {
@@ -584,6 +693,7 @@ function solveCircuit(parts, psu, G) {
 
 /* 고장(과전류) 처리까지 포함 */
 function simulate(parts, psu, G, opts) {
+  if (psu.mode === 'ac') return { res: solveCircuitAC(parts, psu, G, psu.freq || 1000), events: [] };
   const events = [];
   let res;
   for (let pass = 0; pass < 8; pass++) {
@@ -776,7 +886,7 @@ const TOOLS = [
 const PLACE = new Set(['wire', 'resistor', 'led', 'bulb', 'switch', 'ammeter', 'capacitor', 'inductor']);
 
 /* ----- 상태 ----- */
-const state = { parts: [], psu: { on: true, V: 5, fuse: false }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true, resName: true, resValue: true } };
+const state = { parts: [], psu: { on: true, V: 5, fuse: false, mode: 'dc', freq: 1000 }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true, resName: true, resValue: true } };
 const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, note: null, drag: null, suppressClick: false, linkNet: null };
 let last = { R: 220, led: 'red', C: 100e-6, L: 10e-3 };
 let sim = null;
@@ -806,7 +916,7 @@ function load() {
     const o = JSON.parse(raw);
     if (!o || !Array.isArray(o.parts)) return false;
     for (const p of o.parts) { if (!H(p.a) || !H(p.b)) return false; }
-    state.parts = o.parts; state.psu = Object.assign({ on: true, V: 5, fuse: false }, o.psu);
+    state.parts = o.parts; state.psu = Object.assign({ on: true, V: 5, fuse: false, mode: 'dc', freq: 1000 }, o.psu);
     state.seq = o.seq || 0; state.counters = o.counters || {};
     Object.assign(state.settings, o.settings || {});
     Object.assign(last, o.last || {});
@@ -881,7 +991,7 @@ function buildBoard() {
     '<path class="cable-out" d="M-50 44C-22 44 -8 30 16 30"/><path class="cable cable-red" d="M-50 44C-22 44 -8 30 16 30"/>' +
     '<path class="cable-out" d="M-50 76C-22 76 -8 54 16 54"/><path class="cable cable-black" d="M-50 76C-22 76 -8 54 16 54"/>' +
     '<rect class="psu-box" x="-200" y="8" width="158" height="188" rx="12"/>' +
-    '<text class="psu-title" x="-186" y="30">직류 전원장치</text>' +
+    '<text class="psu-title" x="-186" y="30" id="psuBoxTitle">직류 전원장치</text>' +
     '<rect class="lcd" x="-186" y="40" width="108" height="62" rx="7"/>' +
     '<text class="lcd-v" id="psuV" x="-178" y="72">5.0 V</text>' +
     '<text class="lcd-i" id="psuI" x="-178" y="92">0.000 A</text>' +
@@ -1031,9 +1141,10 @@ function mixHex(c1, c2, t) {
 
 function updatePartDyn(c, p, r) {
   r = r || { v: 0, i: 0, p: 0, same: true };
-  const I = r.i;
+  const ac = state.psu.mode === 'ac';
+  const I = ac ? cabs(r.i) : r.i;
   if (c.flow) {
-    const show = state.settings.flow && Math.abs(I) > 5e-6 && !r.same && !p.burnt;
+    const show = !ac && state.settings.flow && Math.abs(I) > 5e-6 && !r.same && !p.burnt;
     c.flow.style.display = show ? '' : 'none';
     if (show) {
       const sp = Math.min(150, 14 + 42 * Math.log10(1 + Math.abs(I) / 0.002));
@@ -1042,7 +1153,7 @@ function updatePartDyn(c, p, r) {
     }
   }
   let hot = false;
-  if (p.type === 'led' && !p.burnt) {
+  if (p.type === 'led' && !p.burnt && !r.unsupported) {
     const b = ledBrightness(I);
     if (c.glow) c.glow.style.opacity = (b * 0.95).toFixed(3);
     if (c.dome) c.dome.style.fillOpacity = (0.38 + 0.62 * Math.min(1, b)).toFixed(3);
@@ -1096,6 +1207,7 @@ function usedNets() {
   return s;
 }
 function updateNets() {
+  const ac = state.psu.mode === 'ac';
   const vmax = Math.max(state.psu.V, 1);
   const used = usedNets();
   if (sim.supply.on) { used.add('RT+'); }
@@ -1104,27 +1216,54 @@ function updateNets() {
     const el = netEls[net];
     const show = state.settings.color && used.has(net) && (net in sim.V);
     el.style.opacity = show ? 0.55 : 0;
-    if (show) el.style.fill = voltColor(sim.V[net], vmax);
+    if (show) el.style.fill = voltColor(ac ? cabs(sim.V[net]) : sim.V[net], vmax);
   }
-  $('#legMax').textContent = trimNum(vmax) + ' V';
+  $('#legMax').textContent = trimNum(vmax) + ' V' + (ac ? ' (진폭)' : '');
 }
 function netVolt(net) { return net in sim.V ? sim.V[net] : null; }
+function vAmp(v) { return v === null ? null : (state.psu.mode === 'ac' ? cabs(v) : v); }
+function vDiff(va, vb) {
+  const ac = state.psu.mode === 'ac';
+  const a = va === null || va === undefined ? (ac ? cx(0, 0) : 0) : va;
+  const b = vb === null || vb === undefined ? (ac ? cx(0, 0) : 0) : vb;
+  return ac ? cabs(csub(a, b)) : a - b;
+}
 
 /* ----- 전원장치 ----- */
 function updatePSU() {
+  const ac = state.psu.mode === 'ac';
+  $$('#modeToggle .chip').forEach(c => c.setAttribute('aria-pressed', c.dataset.v === (ac ? 'ac' : 'dc') ? 'true' : 'false'));
+  $('#psuTitle').textContent = ac ? '교류 전원장치' : '직류 전원장치';
+  $('#psuBoxTitle').textContent = ac ? '교류 전원장치' : '직류 전원장치';
+  $('#freqRow').hidden = !ac;
+  $('#optFaults').disabled = ac;
+  if (ac) {
+    $$('#freqChips .chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.v === state.psu.freq ? 'true' : 'false'));
+    if (document.activeElement !== fIn) fIn.value = fmtFin(state.psu.freq);
+  }
+
   const on = state.psu.on && !state.psu.fuse;
-  const I = sim.supply.I;
+  const Iamp = ac ? cabs(sim.supply.I) : sim.supply.I;
   $('#psuV').textContent = on ? state.psu.V.toFixed(1) + ' V' : '--.- V';
   $('#psuV').classList.toggle('lcd-off', !on);
-  $('#psuI').textContent = (Math.abs(I) < 10 ? I.toFixed(3) : I.toFixed(1)) + ' A';
+  $('#psuI').textContent = (Math.abs(Iamp) < 10 ? Iamp.toFixed(3) : Iamp.toFixed(1)) + ' A';
   $('#psuLed').style.fill = on ? 'var(--ok)' : (state.psu.fuse ? 'var(--bad)' : 'var(--muted)');
   $('#psuState').textContent = state.psu.fuse ? '보호 차단' : (on ? '출력 ON' : '출력 OFF');
   if (document.activeElement !== $('#vIn')) $('#vIn').value = fmtVin(state.psu.V);
   const sw = $('#powerSw');
   sw.setAttribute('aria-checked', state.psu.on ? 'true' : 'false');
-  $('#sI').textContent = fmtI(I);
   $('#sP').textContent = fmtP(sim.supply.P);
-  $('#sR').textContent = on && Math.abs(I) > 1e-7 ? fmtR(sim.supply.V / I) : (on ? '∞ (끊김)' : '—');
+  if (ac) {
+    $('#sILabel').textContent = '실효 전류';
+    $('#sRLabel').textContent = '임피던스';
+    $('#sI').textContent = fmtI(Iamp / Math.SQRT2);
+    $('#sR').textContent = on && Iamp > 1e-7 ? fmtR(cabs(sim.supply.V) / Iamp) + ' ∠' + fmtPhase(phaseDiffDeg(sim.supply.V, sim.supply.I)) : (on ? '∞ (끊김)' : '—');
+  } else {
+    $('#sILabel').textContent = '전체 전류';
+    $('#sRLabel').textContent = '전체 저항';
+    $('#sI').textContent = fmtI(Iamp);
+    $('#sR').textContent = on && Math.abs(Iamp) > 1e-7 ? fmtR(sim.supply.V / Iamp) : (on ? '∞ (끊김)' : '—');
+  }
 }
 
 /* ================= 오버레이 ================= */
@@ -1154,7 +1293,7 @@ function drawOverlay() {
     const ha = H(m.a);
     if (m.b) {
       const hb = H(m.b);
-      const v = (netVolt(ha.net) || 0) - (netVolt(hb.net) || 0);
+      const v = vDiff(netVolt(ha.net), netVolt(hb.net));
       const mx = (ha.x + hb.x) / 2, my = (ha.y + hb.y) / 2;
       s += '<path class="probe-line" d="M' + ha.x + ' ' + ha.y + 'L' + hb.x + ' ' + hb.y + '"/>';
       const txt = fmtV(v), w = txt.length * 8.6 + 18;
@@ -1202,7 +1341,9 @@ function renderInspector() {
     h += '<div class="field"><span class="lab">인덕턴스</span><div class="numin"><input type="number" id="inpL" min="0.001" step="any" value="' + (p.L * 1e3) + '" aria-label="인덕턴스(밀리헨리)"><span class="muted">mH</span></div><div class="chips" id="lChips">' +
       L_CHIPS.map(v => '<button class="chip" data-act="setL" data-v="' + v + '" aria-pressed="' + (v === p.L) + '">' + fmtL(v) + '</button>').join('') + '</div></div>';
   }
-  h += '<dl class="meas"><div><dt>전압 V</dt><dd data-m="v">–</dd></div><div><dt>전류 I</dt><dd data-m="i">–</dd></div><div><dt>전력 P</dt><dd data-m="p">–</dd></div></dl>';
+  const ac = state.psu.mode === 'ac';
+  h += '<dl class="meas"><div><dt>전압 V</dt><dd data-m="v">–</dd></div><div><dt>전류 I</dt><dd data-m="i">–</dd></div><div><dt>전력 P</dt><dd data-m="p">–</dd></div>' +
+    (ac ? '<div><dt>위상차 φ</dt><dd data-m="phi">–</dd></div>' : '') + '</dl>';
   h += '<div class="formula" data-m="formula"></div><div data-m="warn"></div>';
   h += '<p class="muted" style="margin:10px 0 0;font-size:12px">꽂힌 위치 ' + p.a + ' → ' + p.b + '</p>';
   box.innerHTML = h;
@@ -1211,11 +1352,44 @@ function renderInspector() {
 function updateInspectorNumbers() {
   const p = sel();
   if (!p) return;
-  const r = sim.parts[p.id] || { v: 0, i: 0, p: 0, same: true };
+  const ac = state.psu.mode === 'ac';
   const set = (k, t) => { const el = $('[data-m="' + k + '"]', $('#inspector')); if (el) el.textContent = t; };
-  set('v', fmtV(r.v)); set('i', fmtI(r.i)); set('p', fmtP(r.p));
   const f = $('[data-m="formula"]', $('#inspector'));
   let fh = '', wh = '';
+  if (ac) {
+    const r = sim.parts[p.id] || { v: cx(0, 0), i: cx(0, 0), p: 0, same: true };
+    if (p.type === 'led' || r.unsupported) {
+      set('v', '–'); set('i', '–'); set('p', '–'); set('phi', '–');
+      fh = 'LED는 교류 분석에서 지원하지 않아요(비선형 소자). 직류 모드에서만 확인할 수 있어요.';
+      wh = '<div class="callout warn">교류 모드에서는 이 LED를 지나는 전류를 계산하지 않아요.</div>';
+    } else {
+      const amp = cabs(r.v), ampI = cabs(r.i), phi = phaseDiffDeg(r.v, r.i);
+      set('v', fmtV(amp)); set('i', fmtI(ampI)); set('p', fmtP(r.p)); set('phi', fmtPhase(phi));
+      const lead = phi > 0.05 ? '전압이 전류보다 ' + fmtPhase(Math.abs(phi)) + ' 앞서요.' : phi < -0.05 ? '전류가 전압보다 ' + fmtPhase(Math.abs(phi)) + ' 앞서요.' : '전압과 전류의 위상이 같아요.';
+      if (p.type === 'resistor' || (p.type === 'bulb' && !p.burnt)) {
+        fh = '저항은 교류에서도 전압·전류 위상이 같아요(순수 저항).<br>' + lead;
+      } else if (p.type === 'capacitor') {
+        const xc = 1 / (sim.w * Math.max(p.C, 1e-15));
+        fh = '용량 리액턴스 <b>Xc = 1/(ωC)</b><span class="eq">' + fmtR(xc) + '</span>' + lead;
+      } else if (p.type === 'inductor') {
+        const xl = sim.w * p.L;
+        fh = '유도 리액턴스 <b>XL = ωL</b><span class="eq">' + fmtR(xl) + '</span>' + lead;
+      } else if (p.type === 'wire') {
+        fh = '점퍼선은 저항이 거의 0이라 두 끝의 전위가 같아요.';
+      } else if (p.type === 'switch') {
+        fh = p.closed ? '닫힌 스위치는 도선처럼 전류가 흘러요.' : '열린 스위치는 회로를 끊어 전류가 흐르지 않아요.';
+      } else if (p.type === 'ammeter') {
+        fh = '전류계는 회로에 <b>직렬</b>로 끼워서 써요.';
+      }
+      if (r.same) wh = '<div class="callout warn">양쪽 다리가 같은 줄에 꽂혀 있어요. 이 부품은 건너뛰어(단락) 아무 일도 하지 않아요.</div>';
+    }
+    if (f) f.innerHTML = fh;
+    const w = $('[data-m="warn"]', $('#inspector'));
+    if (w && w.dataset.h !== wh) { w.dataset.h = wh; w.innerHTML = wh; }
+    return;
+  }
+  const r = sim.parts[p.id] || { v: 0, i: 0, p: 0, same: true };
+  set('v', fmtV(r.v)); set('i', fmtI(r.i)); set('p', fmtP(r.p));
   if (p.type === 'resistor' || (p.type === 'bulb' && !p.burnt)) {
     fh = '옴의 법칙 <b>V = I × R</b><span class="eq">' + fmtV(Math.abs(r.v)) + ' = ' + fmtI(Math.abs(r.i)) + ' × ' + fmtR(p.R) + '</span>';
   } else if (p.type === 'led') {
@@ -1244,15 +1418,20 @@ function updateInspectorNumbers() {
 
 function updateAlerts() {
   let h = '';
+  const ac = state.psu.mode === 'ac';
+  const Isup = ac ? cabs(sim.supply.I) : sim.supply.I;
   if (state.psu.fuse) {
     h += '<div class="callout bad"><b>과전류! 전원이 차단됐어요.</b><br>합선(단락)이거나 저항이 너무 작은 회로일 수 있어요. 회로를 고친 뒤 복구하세요.<br><button class="btn small" data-act="fuse">전원 복구</button></div>';
   }
   state.parts.filter(p => p.burnt).forEach(p => {
     h += '<div class="callout bad"><b>' + esc(p.name) + '</b>이(가) 고장났어요.<br><button class="btn small" data-act="fixId" data-id="' + p.id + '">교체하기</button></div>';
   });
+  if (ac && state.parts.some(p => p.type === 'led')) {
+    h += '<div class="callout warn">교류 모드에서는 LED를 지나는 전류를 계산하지 않아요(비선형 소자라 지원하지 않음). LED 동작은 직류 모드에서 확인하세요.</div>';
+  }
   if (!state.psu.fuse && state.parts.length) {
     if (!state.psu.on) h += '<div class="callout info">전원이 꺼져 있어요. 오른쪽 위 스위치를 켜 보세요.</div>';
-    else if (Math.abs(sim.supply.I) < 1e-7) h += '<div class="callout info">전류가 흐르지 않아요. 회로가 끊겨 있거나, 스위치가 열려 있거나, 전원 레일과 이어지지 않았을 수 있어요.</div>';
+    else if (Math.abs(Isup) < 1e-7) h += '<div class="callout info">전류가 흐르지 않아요. 회로가 끊겨 있거나, 스위치가 열려 있거나, 전원 레일과 이어지지 않았을 수 있어요.</div>';
   }
   const box = $('#alerts');
   if (box.dataset.h !== h) { box.dataset.h = h; box.innerHTML = h; }
@@ -1261,14 +1440,15 @@ function updateAlerts() {
 function updateMeterCard() {
   const m = ui.meter, box = $('#meterCard');
   let h;
-  const nv = id => { const v = netVolt(H(id).net); return v === null ? 0 : v; };
+  const nv = id => netVolt(H(id).net);
+  const ac = state.psu.mode === 'ac';
   if (!m.a) {
     h = '<p class="muted" style="margin:0">도구함에서 <b>전압 측정</b>을 고른 뒤, 빨간 프로브와 검정 프로브를 꽂을 구멍을 차례로 클릭하세요.</p>';
   } else if (!m.b) {
-    h = '<p style="margin:0">빨간 프로브: <b>' + holeLabel(H(m.a)) + '</b> (전원 − 기준 ' + fmtV(nv(m.a)) + ')<br><span class="muted">이제 검정 프로브 구멍을 클릭하세요.</span></p>';
+    h = '<p style="margin:0">빨간 프로브: <b>' + holeLabel(H(m.a)) + '</b> (전원 − 기준 ' + fmtV(vAmp(nv(m.a)) || 0) + (ac ? ', 진폭' : '') + ')<br><span class="muted">이제 검정 프로브 구멍을 클릭하세요.</span></p>';
   } else {
-    const v = nv(m.a) - nv(m.b);
-    h = '<div class="meter-read">' + fmtV(v) + '</div><div class="muted" style="font-size:12.5px">빨강 ' + holeLabel(H(m.a)) + ' − 검정 ' + holeLabel(H(m.b)) + '</div><div style="margin-top:8px"><button class="btn small" data-act="clearMeter">측정 지우기</button></div>';
+    const v = vDiff(nv(m.a), nv(m.b));
+    h = '<div class="meter-read">' + fmtV(v) + '</div><div class="muted" style="font-size:12.5px">빨강 ' + holeLabel(H(m.a)) + ' − 검정 ' + holeLabel(H(m.b)) + (ac ? ' (진폭 차이)' : '') + '</div><div style="margin-top:8px"><button class="btn small" data-act="clearMeter">측정 지우기</button></div>';
   }
   if (box.dataset.h !== h) { box.dataset.h = h; box.innerHTML = h; }
 }
@@ -1349,7 +1529,7 @@ function loadPreset(id) {
     const extra = Object.assign({}, d); delete extra.type; delete extra.a; delete extra.b;
     state.parts.push(newPart(d.type, d.a, d.b, extra));
   });
-  state.psu = { on: true, V: pr.V, fuse: false };
+  state.psu = { on: true, V: pr.V, fuse: false, mode: pr.mode || 'dc', freq: pr.freq || 1000 };
   ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null };
   ui.note = { name: pr.name, text: pr.note };
   refresh(true);
@@ -1367,7 +1547,7 @@ function exportCircuit() {
   if (!state.parts.length) { toast('저장할 회로가 없어요. 부품을 먼저 배치해 주세요.'); return; }
   const data = {
     format: CIRCUIT_FORMAT, version: 1, savedAt: new Date().toISOString(),
-    psu: { V: state.psu.V },
+    psu: { V: state.psu.V, mode: state.psu.mode, freq: state.psu.freq },
     parts: state.parts.map(p => {
       const d = { type: p.type, a: p.a, b: p.b, name: p.name };
       if (p.type === 'resistor') d.R = p.R;
@@ -1410,7 +1590,12 @@ function importCircuit(text) {
     state.parts.push(newPart(d.type, d.a, d.b, extra));
   });
   const v = o.psu && +o.psu.V;
-  state.psu = { on: true, V: (v >= 0 && v <= V_MAX) ? v : 5, fuse: false };
+  const f = o.psu && +o.psu.freq;
+  state.psu = {
+    on: true, V: (v >= 0 && v <= V_MAX) ? v : 5, fuse: false,
+    mode: o.psu && o.psu.mode === 'ac' ? 'ac' : 'dc',
+    freq: (f >= F_MIN && f <= F_MAX) ? f : 1000
+  };
   ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.note = null;
   refresh(true);
   toast(!state.parts.length ? '불러올 부품이 없어요.' : skipped ? '회로를 불러왔어요. (겹치거나 잘못된 부품 ' + skipped + '개는 제외)' : '회로를 불러왔어요.');
@@ -1442,7 +1627,7 @@ function updateHover() {
   }
   if (!ui.hover) { hv.textContent = ''; return; }
   const h = H(ui.hover), v = netVolt(h.net);
-  hv.textContent = holeLabel(h) + ' · ' + (v === null ? '연결된 부품 없음' : fmtV(v));
+  hv.textContent = holeLabel(h) + ' · ' + (v === null ? '연결된 부품 없음' : fmtV(vAmp(v)));
 }
 
 function onHover(e) {
@@ -1564,6 +1749,8 @@ document.addEventListener('click', e => {
     case 'fuse': state.psu.fuse = false; refresh(true); break;
     case 'clearMeter': ui.meter = { a: null, b: null }; refresh(false); break;
     case 'closeNote': ui.note = null; refresh(false); break;
+    case 'setMode': pushHistory(); state.psu.mode = v; refresh(true); break;
+    case 'setFreq': pushHistory(); state.psu.freq = +v; fIn.value = fmtFin(+v); finHelp(''); refresh(false); break;
   }
 });
 document.addEventListener('input', e => {
@@ -1639,6 +1826,40 @@ vIn.addEventListener('keydown', e => {
   }
 });
 vIn.addEventListener('focus', () => vIn.select());
+
+const F_MIN = 1, F_MAX = 20000;
+const FREQ_CHIPS = [60, 440, 1000, 5000, 20000];
+function fmtFin(v) { return String(+(+v).toFixed(1)); }
+function parseFin(s) {
+  s = String(s).trim().replace(',', '.').replace(/\s*(hz|Hz|헤르츠)+$/, '');
+  if (s === '' || !/^\d*\.?\d+$|^\d+\.$/.test(s)) return NaN;
+  return parseFloat(s);
+}
+function finHelp(msg, bad) {
+  const h = $('#fInHelp');
+  h.textContent = msg || '숫자를 입력하고 Enter를 누르세요. ' + F_MIN + '~' + F_MAX + ' Hz';
+  h.classList.toggle('bad', !!bad);
+}
+const fIn = $('#fIn');
+fIn.addEventListener('input', () => {
+  const v = parseFin(fIn.value);
+  if (isNaN(v)) { finHelp(fIn.value.trim() === '' ? '' : '숫자만 입력해 주세요. 예: 1000', fIn.value.trim() !== ''); return; }
+  if (v > F_MAX || v < F_MIN) { finHelp(F_MIN + '~' + F_MAX + ' Hz 사이로 입력해 주세요.', true); return; }
+  finHelp('');
+  state.psu.freq = v; refresh(false);
+});
+function commitFin() {
+  const v = parseFin(fIn.value);
+  if (!isNaN(v)) state.psu.freq = clamp(v, F_MIN, F_MAX);
+  fIn.value = fmtFin(state.psu.freq);
+  finHelp('');
+  refresh(false);
+}
+fIn.addEventListener('blur', commitFin);
+fIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); commitFin(); fIn.select(); } });
+fIn.addEventListener('focus', () => fIn.select());
+$('#freqChips').innerHTML = FREQ_CHIPS.map(f => '<button class="chip" data-act="setFreq" data-v="' + f + '" aria-pressed="false">' + fmtF(f) + '</button>').join('');
+
 $('#powerSw').addEventListener('click', () => { state.psu.on = !state.psu.on; refresh(false); });
 $('#btnUndo').addEventListener('click', undo);
 let clearTimer = 0;

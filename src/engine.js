@@ -65,6 +65,9 @@ function fmtL(v) {
   if (v >= 1e-3) return trimNum(v * 1e3) + ' mH';
   return trimNum(v * 1e6) + ' µH';
 }
+function fmtPhase(deg) { return (Math.round(deg * 10) / 10).toFixed(1) + '°'; }
+function fmtF(f) { return f >= 1000 ? trimNum(f / 1000) + ' kHz' : trimNum(f) + ' Hz'; }
+const phaseDiffDeg = (vPh, iPh) => { let d = (cphase(vPh) - cphase(iPh)) * 180 / Math.PI; return ((d + 540) % 360) - 180; };
 
 /* ----- 저항 색띠 ----- */
 const BAND_COL = ['#1c1c1c', '#7b4a1e', '#d3322b', '#ee7b1c', '#f1d21d', '#2f9d4b', '#2b5fd6', '#8b44b8', '#8a8f94', '#f3f3ef'];
@@ -126,6 +129,102 @@ function solveLinear(A, z) {
     x[i] = s / A[i][i];
   }
   return x;
+}
+
+/* ===== 교류(위상자) 해석용 최소 복소수 연산 ===== */
+const cx = (re, im) => ({ re, im: im || 0 });
+const cadd = (a, b) => ({ re: a.re + b.re, im: a.im + b.im });
+const csub = (a, b) => ({ re: a.re - b.re, im: a.im - b.im });
+const cmul = (a, b) => ({ re: a.re * b.re - a.im * b.im, im: a.re * b.im + a.im * b.re });
+const cdiv = (a, b) => { const d = b.re * b.re + b.im * b.im || 1e-30; return { re: (a.re * b.re + a.im * b.im) / d, im: (a.im * b.re - a.re * b.im) / d }; };
+const cabs = a => Math.hypot(a.re, a.im);
+const cphase = a => Math.atan2(a.im, a.re);
+
+function solveLinearComplex(A, z) {
+  const n = z.length;
+  for (let k = 0; k < n; k++) {
+    let piv = k, best = cabs(A[k][k]);
+    for (let i = k + 1; i < n; i++) { const v = cabs(A[i][k]); if (v > best) { best = v; piv = i; } }
+    if (piv !== k) { [A[k], A[piv]] = [A[piv], A[k]]; [z[k], z[piv]] = [z[piv], z[k]]; }
+    if (cabs(A[k][k]) < 1e-30) A[k][k] = cx(1e-30, 0);
+    for (let i = k + 1; i < n; i++) {
+      const f = cdiv(A[i][k], A[k][k]);
+      if (f.re === 0 && f.im === 0) continue;
+      for (let j = k; j < n; j++) A[i][j] = csub(A[i][j], cmul(f, A[k][j]));
+      z[i] = csub(z[i], cmul(f, z[k]));
+    }
+  }
+  const x = new Array(n).fill(0).map(() => cx(0, 0));
+  for (let i = n - 1; i >= 0; i--) {
+    let s = z[i];
+    for (let j = i + 1; j < n; j++) s = csub(s, cmul(A[i][j], x[j]));
+    x[i] = cdiv(s, A[i][i]);
+  }
+  return x;
+}
+
+/* 한 번 계산(교류, 위상자 — 진폭 기준, 전원 위상 0°). LED는 비선형이라 지원하지 않음(개방 취급). */
+function solveCircuitAC(parts, psu, G, freq) {
+  const w = 2 * Math.PI * (freq || 1000);
+  const idxMap = new Map([[GROUND_NET, -1]]);
+  let n = 0;
+  const idx = net => { if (!idxMap.has(net)) idxMap.set(net, n++); return idxMap.get(net); };
+  const psuOn = !!(psu.on && !psu.fuse);
+  if (psuOn) idx('RT+');
+  const rs = [], info = {};
+  for (const p of parts) {
+    const na = G.holes[p.a].net, nb = G.holes[p.b].net;
+    const ia = idx(na), ib = idx(nb);
+    const same = na === nb;
+    info[p.id] = { same };
+    if (p.type === 'led' || same) continue;
+    let Y = cx(0, 0);
+    if (p.type === 'wire') Y = cx(1 / E.R_WIRE, 0);
+    else if (p.type === 'resistor') Y = cx(1 / Math.max(p.R, 1e-3), 0);
+    else if (p.type === 'bulb') { if (!p.burnt) Y = cx(1 / Math.max(p.R, 1e-3), 0); }
+    else if (p.type === 'switch') { if (p.closed) Y = cx(1 / E.R_SWITCH, 0); }
+    else if (p.type === 'ammeter') Y = cx(1 / E.R_AMM, 0);
+    else if (p.type === 'inductor') Y = cx(0, -1 / (w * Math.max(p.L, 1e-9)));
+    else if (p.type === 'capacitor') Y = cx(0, w * p.C);
+    if (Y.re !== 0 || Y.im !== 0) rs.push({ p, ia, ib, Y });
+  }
+  const N = n;
+  const A = Array.from({ length: N }, () => Array.from({ length: N }, () => cx(0, 0)));
+  const z = Array.from({ length: N }, () => cx(0, 0));
+  const stampG = (i, j, Y) => {
+    if (i >= 0) A[i][i] = cadd(A[i][i], Y);
+    if (j >= 0) A[j][j] = cadd(A[j][j], Y);
+    if (i >= 0 && j >= 0) { A[i][j] = csub(A[i][j], Y); A[j][i] = csub(A[j][i], Y); }
+  };
+  for (let i = 0; i < N; i++) A[i][i] = cadd(A[i][i], cx(E.GMIN, 0));
+  for (const r of rs) stampG(r.ia, r.ib, r.Y);
+  const gInt = 1 / E.R_INT;
+  if (psuOn) { const i = idxMap.get('RT+'); A[i][i] = cadd(A[i][i], cx(gInt, 0)); z[i] = cadd(z[i], cx(psu.V * gInt, 0)); }
+  const V = N ? solveLinearComplex(A, z) : [];
+  const vOf = net => { const i = idxMap.get(net); return i === undefined || i < 0 ? cx(0, 0) : V[i]; };
+  const out = { parts: {}, V: {}, supply: {}, freq: freq || 1000, w, converged: true, iters: 1 };
+  idxMap.forEach((i, net) => { out.V[net] = i < 0 ? cx(0, 0) : V[i]; });
+  for (const p of parts) {
+    const na = G.holes[p.a].net, nb = G.holes[p.b].net;
+    const v = csub(vOf(na), vOf(nb));
+    const same = info[p.id].same;
+    if (p.type === 'led') { out.parts[p.id] = { v, i: cx(0, 0), p: 0, same, unsupported: true }; continue; }
+    let i = cx(0, 0);
+    if (!same) {
+      if (p.type === 'wire') i = cmul(v, cx(1 / E.R_WIRE, 0));
+      else if (p.type === 'resistor') i = cmul(v, cx(1 / Math.max(p.R, 1e-3), 0));
+      else if (p.type === 'bulb') i = p.burnt ? cx(0, 0) : cmul(v, cx(1 / Math.max(p.R, 1e-3), 0));
+      else if (p.type === 'switch') i = p.closed ? cmul(v, cx(1 / E.R_SWITCH, 0)) : cx(0, 0);
+      else if (p.type === 'ammeter') i = cmul(v, cx(1 / E.R_AMM, 0));
+      else if (p.type === 'inductor') i = cmul(v, cx(0, -1 / (w * Math.max(p.L, 1e-9))));
+      else if (p.type === 'capacitor') i = cmul(v, cx(0, w * p.C));
+    }
+    out.parts[p.id] = { v, i, p: 0.5 * (v.re * i.re + v.im * i.im), same };
+  }
+  const vt = vOf('RT+');
+  const isup = psuOn ? cmul(csub(cx(psu.V, 0), vt), cx(gInt, 0)) : cx(0, 0);
+  out.supply = { V: vt, I: isup, P: 0.5 * (vt.re * isup.re + vt.im * isup.im), on: psuOn };
+  return out;
 }
 
 function ledParams(p) {
@@ -225,6 +324,7 @@ function solveCircuit(parts, psu, G) {
 
 /* 고장(과전류) 처리까지 포함 */
 function simulate(parts, psu, G, opts) {
+  if (psu.mode === 'ac') return { res: solveCircuitAC(parts, psu, G, psu.freq || 1000), events: [] };
   const events = [];
   let res;
   for (let pass = 0; pass < 8; pass++) {

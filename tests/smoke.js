@@ -146,6 +146,40 @@ const one = $$('.part-wire')[0];
 if (one) click(0, 0, one.querySelector('.wire-col'));
 ok($$('.part').length === before - 1 || before === 0, '지우개로 삭제 ' + before + '→' + $$('.part').length);
 
+// 교류(AC) 모드 — RC 직렬 회로
+$('#btnClear').click(); $('#btnClear').click();
+{ const v3 = $('#vIn'); v3.value = '10'; v3.dispatchEvent(new w.Event('input', { bubbles: true })); v3.dispatchEvent(new w.Event('blur')); }
+$('.tool[data-tool=wire]').click();
+click(...geom['rt+:3']); click(...geom.a5);
+$('.tool[data-tool=resistor]').click();
+click(...geom.b5); click(...geom.a9);
+$('.tool[data-tool=capacitor]').click();
+click(...geom.c9); click(...geom['rt-:8']);
+ok($$('.part').length === 3, 'RC 직렬 회로 구성(점퍼선+저항+축전기)');
+
+$('[data-act=setMode][data-v=ac]').click();
+ok(text('#psuTitle') === '교류 전원장치', 'AC 모드 전환: ' + text('#psuTitle'));
+ok(!$('#freqRow').hidden, '주파수 입력란 표시');
+ok($('#optFaults').disabled, '교류에서 고장 시뮬레이션 토글 비활성화');
+
+$('.tool[data-tool=select]').click();
+click(0, 0, $$('.part-resistor')[0].querySelector('[data-role=body]'));
+ok(/위상차/.test(text('#inspector')) && /°/.test(text('#inspector')), '교류 모드 위상차 표시: ' + text('#inspector').slice(0, 160));
+
+$('.tool[data-tool=led]').click();
+click(...geom.d15); click(...geom.d19);
+ok(/LED/.test(text('#alerts')) && /지원하지 않/.test(text('#alerts')), 'LED 교류 미지원 알림: ' + text('#alerts'));
+
+const freqChip = $$('#freqChips .chip').find(c => c.dataset.v === '5000');
+freqChip.click();
+ok($('#fIn').value === '5000', '주파수 칩 5000Hz 반영: ' + $('#fIn').value);
+const fInEl = $('#fIn'); fInEl.value = '2000'; fInEl.dispatchEvent(new w.Event('input', { bubbles: true }));
+ok(!/숫자만|사이로/.test(text('#fInHelp')), '주파수 직접 입력 유효성 통과: ' + text('#fInHelp'));
+
+$('[data-act=setMode][data-v=dc]').click();
+ok($('#freqRow').hidden, 'DC로 돌아가면 주파수 입력 숨김');
+ok(!$('#optFaults').disabled, 'DC에서 고장 시뮬레이션 토글 다시 활성화');
+
 // 합선: 12V 와 점퍼선으로 레일 연결
 $('#btnClear').click(); $('#btnClear').click();
 $('.tool[data-tool=wire]').click();

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const dir = __dirname + '/../src/';
 const code = fs.readFileSync(dir + 'engine.js', 'utf8');
-const api = new Function(code + '\nreturn {buildGeometry,simulate,solveCircuit,PRESETS,fmtR,fmtV,fmtI,fmtP,resistorBands};')();
+const api = new Function(code + '\nreturn {buildGeometry,simulate,solveCircuit,solveCircuitAC,PRESETS,fmtR,fmtV,fmtI,fmtP,resistorBands,cabs,cphase};')();
 const G = api.buildGeometry();
 
 function load(preset, over) {
@@ -119,6 +119,42 @@ check('고장 후 전류', Math.abs(r.res.parts.p2.i), 0, 1e-9);
   const out = api.simulate(c.parts, c.psu, G, { faults: true });
   console.log('같은 줄', out.res.parts.r);
 }
+// ===== 교류(위상자) 해석 =====
+// 직렬 RC: R=1kΩ, C=1µF, f=1000Hz, V진폭=10V → |Z|=1012.6Ω, I≈9.88mA, 전류가 전압보다 약 9.0° 앞섬(용량성)
+{
+  const parts = [{ id: 'r', type: 'resistor', R: 1000, a: 'rt+:1', b: 'a5' }, { id: 'c', type: 'capacitor', C: 1e-6, a: 'a5', b: 'rt-:1' }];
+  const psu = { on: true, V: 10, fuse: false, mode: 'ac', freq: 1000 };
+  const out = api.solveCircuitAC(parts, psu, G, 1000);
+  const amp = api.cabs(out.parts.r.i), ph = api.cphase(out.parts.r.i) * 180 / Math.PI;
+  check('RC 직렬 전류 진폭(mA)', amp * 1000, 9.7, 10.0);
+  check('RC 직렬 전류 위상(전류가 앞섬, deg)', ph, 8.5, 9.5);
+}
+// 직렬 RL: R=100Ω, L=10mH, f=1000Hz, V진폭=5V → |Z|=118.1Ω, I≈42.3mA, 전류가 전압보다 약 32.1° 뒤짐(유도성)
+{
+  const parts = [{ id: 'r', type: 'resistor', R: 100, a: 'rt+:1', b: 'a5' }, { id: 'l', type: 'inductor', L: 10e-3, a: 'a5', b: 'rt-:1' }];
+  const psu = { on: true, V: 5, fuse: false, mode: 'ac', freq: 1000 };
+  const out = api.solveCircuitAC(parts, psu, G, 1000);
+  const amp = api.cabs(out.parts.r.i), ph = api.cphase(out.parts.r.i) * 180 / Math.PI;
+  check('RL 직렬 전류 진폭(mA)', amp * 1000, 42.0, 42.6);
+  check('RL 직렬 전류 위상(전류가 뒤짐, deg)', ph, -32.5, -31.7);
+}
+// 순수 저항 회로: DC 솔버와 AC 솔버 결과가 크기는 같고 위상은 0°여야 함(가장 저렴하고 강력한 회귀 검증)
+{
+  const parts = [{ id: 'r', type: 'resistor', R: 220, a: 'rt+:1', b: 'a5' }, { id: 'w', type: 'wire', a: 'a5', b: 'rt-:1' }];
+  const dc = api.solveCircuit(parts, { on: true, V: 5, fuse: false }, G);
+  const ac = api.solveCircuitAC(parts, { on: true, V: 5, fuse: false, mode: 'ac', freq: 1000 }, G, 1000);
+  check('순수 저항: AC/DC 전류 크기 일치', api.cabs(ac.parts.r.i), dc.parts.r.i * 0.999, dc.parts.r.i * 1.001);
+  check('순수 저항: AC 위상 0°', api.cphase(ac.parts.r.i) * 180 / Math.PI, -0.01, 0.01);
+}
+// LED는 교류에서 지원하지 않음(비선형) → 전류 0, unsupported 플래그
+{
+  const parts = [{ id: 'r', type: 'resistor', R: 220, a: 'rt+:1', b: 'a5' }, { id: 'l', type: 'led', color: 'red', a: 'a5', b: 'rt-:1' }];
+  const out = api.solveCircuitAC(parts, { on: true, V: 5, fuse: false, mode: 'ac', freq: 1000 }, G, 1000);
+  if (!out.parts.l.unsupported) fail++;
+  check('LED 교류 전류=0', api.cabs(out.parts.l.i), 0, 1e-9);
+  console.log('LED AC unsupported=', out.parts.l.unsupported);
+}
+
 console.log(api.fmtR(4700), api.fmtR(220), api.fmtR(1e6), api.fmtI(0.0214), api.fmtI(0.5), api.fmtI(2e-5), api.fmtP(0.0456));
 console.log('띠 220', api.resistorBands(220), '띠 4.7k', api.resistorBands(4700), '띠 1k', api.resistorBands(1000), '띠 4.7', api.resistorBands(4.7));
 console.log(fail ? ('실패 ' + fail) : '모든 검증 통과');
