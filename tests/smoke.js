@@ -6,6 +6,7 @@ const vc = new VirtualConsole();
 vc.on('jsdomError', e => {
   const msg = String((e.detail && e.detail.message) || e.message || e);
   if (/Not implemented: navigation/.test(msg)) return; // jsdom은 <a download> 클릭을 지원하지 않음(실제 브라우저는 저장됨)
+  if (/Not implemented: HTMLCanvasElement\.prototype\.getContext/.test(msg)) return; // jsdom엔 canvas 2d 컨텍스트가 없음(updateScope가 안전하게 건너뜀, 실제 브라우저는 정상 동작)
   errors.push('jsdomError: ' + msg);
 });
 vc.on('error', e => errors.push('console.error: ' + e));
@@ -179,6 +180,20 @@ ok(!/숫자만|사이로/.test(text('#fInHelp')), '주파수 직접 입력 유�
 $('[data-act=setMode][data-v=dc]').click();
 ok($('#freqRow').hidden, 'DC로 돌아가면 주파수 입력 숨김');
 ok(!$('#optFaults').disabled, 'DC에서 고장 시뮬레이션 토글 다시 활성화');
+
+// 오실로스코프
+ok(/교류 모드로 바꾸면/.test(text('#scopeBody')), 'DC 모드 오실로스코프 안내문: ' + text('#scopeBody'));
+$('[data-act=setMode][data-v=ac]').click();
+ok(/CH1.*CH2/.test(text('#scopeBody').replace(/\s/g, '')), '교류 전환 직후 채널 선택 안내: ' + text('#scopeBody'));
+$('.tool[data-tool=scope]').click();
+click(...geom.a5); click(...geom.a9);
+ok(!!$('#scopeCanvas'), '오실로스코프 캔버스 생성');
+ok(/CH1/.test(text('#scopeBody')) && /CH2/.test(text('#scopeBody')), '오실로스코프 두 채널 진폭 표시: ' + text('#scopeBody'));
+ok(/위상차/.test(text('#scopeBody')), '오실로스코프 위상차 표시: ' + text('#scopeBody'));
+$('[data-act=clearScope]').click();
+ok(/CH1·CH2 프로브/.test(text('#scopeBody')), '오실로스코프 측정 지우기: ' + text('#scopeBody'));
+$('.tool[data-tool=select]').click();
+$('[data-act=setMode][data-v=dc]').click();
 
 // 합선: 12V 와 점퍼선으로 레일 연결
 $('#btnClear').click(); $('#btnClear').click();

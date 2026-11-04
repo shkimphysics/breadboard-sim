@@ -15,6 +15,7 @@
   --plus:#D93A2F; --minus:#2457C5; --current:#F5A300;
   --ok:#1C8A4C; --warn:#9A5B00; --bad:#C23B2B;
   --warn-soft:#FBEBD0; --bad-soft:#F9DAD5; --ok-soft:#D7EFE0;
+  --scope-ch1:#D98C00; --scope-ch2:#1C8FA8; --scope-grid:#B5BFC7;
   --wire-outline:rgba(0,0,0,.38);
   --shadow:0 1px 2px rgba(15,30,40,.12),0 10px 28px rgba(15,30,40,.12);
   --font:'IBM Plex Sans KR','Noto Sans KR','Apple SD Gothic Neo','Malgun Gothic',system-ui,sans-serif;
@@ -31,6 +32,7 @@
     --plus:#FF6B5E; --minus:#6D9BFF; --current:#FFC233;
     --ok:#4CCB84; --warn:#F0A63A; --bad:#FF7A6B;
     --warn-soft:#3A2C12; --bad-soft:#3E1D19; --ok-soft:#14301F;
+    --scope-ch1:#FFC233; --scope-ch2:#46C3D1; --scope-grid:#3A4750;
     --wire-outline:rgba(255,255,255,.5);
     --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
     color-scheme:dark;
@@ -46,6 +48,7 @@
   --plus:#FF6B5E; --minus:#6D9BFF; --current:#FFC233;
   --ok:#4CCB84; --warn:#F0A63A; --bad:#FF7A6B;
   --warn-soft:#3A2C12; --bad-soft:#3E1D19; --ok-soft:#14301F;
+  --scope-ch1:#FFC233; --scope-ch2:#46C3D1; --scope-grid:#3A4750;
   --wire-outline:rgba(255,255,255,.5);
   --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px rgba(0,0,0,.45);
   color-scheme:dark;
@@ -236,6 +239,13 @@ svg.no-flow .flow{display:none}
 .probe-text{fill:#fff;font:700 10px var(--mono);text-anchor:middle}
 .read-box{fill:var(--fg)}
 .read-text{fill:var(--bg);font:600 13px var(--mono);text-anchor:middle}
+.probe-ch1{fill:var(--scope-ch1)}
+.probe-ch2{fill:var(--scope-ch2)}
+.scope-wrap{background:var(--panel-2);border-radius:8px;padding:8px}
+#scopeCanvas{display:block;width:100%;height:160px}
+.scope-legend{display:flex;gap:14px;flex-wrap:wrap;font:500 12.5px var(--mono);margin-top:8px}
+.scope-legend span{display:inline-flex;align-items:center;gap:5px}
+.scope-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
 
 @media (prefers-reduced-motion:reduce){
   .flow{animation:none}
@@ -355,6 +365,11 @@ svg.no-flow .flow{display:none}
     <section class="panel card">
       <h2>전압 측정</h2>
       <div id="meterCard"></div>
+    </section>
+
+    <section class="panel card" id="scopeCard">
+      <h2>오실로스코프</h2>
+      <div id="scopeBody"></div>
     </section>
 
     <section class="panel card" id="noteCard" hidden>
@@ -875,19 +890,20 @@ const ICONS = {
   meter: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><text x="12" y="16.6" text-anchor="middle" font-size="12.5" font-weight="700" fill="currentColor" font-family="IBM Plex Mono,monospace">V</text></svg>',
   capacitor: '<svg viewBox="0 0 24 24"><path d="M1 12h7M16 12h7" stroke="#a9b2b9" stroke-width="2.4" stroke-linecap="round"/><rect x="8" y="5" width="2.6" height="14" rx="1" fill="#6b8fb0" stroke="rgba(0,0,0,.4)"/><rect x="13.4" y="5" width="2.6" height="14" rx="1" fill="#6b8fb0" stroke="rgba(0,0,0,.4)"/></svg>',
   inductor: '<svg viewBox="0 0 24 24"><path d="M1 12h3M19 12h4" stroke="#a9b2b9" stroke-width="2.4" stroke-linecap="round"/><path d="M4 12a2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0 2.5 2.5 0 0 1 5 0" fill="none" stroke="#c28a1c" stroke-width="2.2" stroke-linecap="round"/></svg>',
+  scope: '<svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="16" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 11c1.5-4 2.5-4 3.5 0s2.5 4 3.5 0 2.5-4 3.5 0 2.5 4 3.5 0" fill="none" stroke="#D98C00" stroke-width="1.6" stroke-linecap="round"/></svg>',
   erase: '<svg viewBox="0 0 24 24"><path d="M5 7h14M9.5 7V4.8h5V7M7 7l.9 12.2h8.2L17 7M10.3 10.5v6M13.7 10.5v6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 const TOOLS = [
   { id: 'select', label: '선택 · 이동' }, { id: 'wire', label: '점퍼선' }, { id: 'resistor', label: '저항' },
   { id: 'led', label: 'LED' }, { id: 'bulb', label: '전구' }, { id: 'switch', label: '스위치' },
   { id: 'ammeter', label: '전류계' }, { id: 'capacitor', label: '축전기' }, { id: 'inductor', label: '인덕터' },
-  { id: 'meter', label: '전압 측정' }, { id: 'erase', label: '지우개' }
+  { id: 'meter', label: '전압 측정' }, { id: 'scope', label: '오실로스코프' }, { id: 'erase', label: '지우개' }
 ];
 const PLACE = new Set(['wire', 'resistor', 'led', 'bulb', 'switch', 'ammeter', 'capacitor', 'inductor']);
 
 /* ----- 상태 ----- */
 const state = { parts: [], psu: { on: true, V: 5, fuse: false, mode: 'dc', freq: 1000 }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true, resName: true, resValue: true } };
-const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, note: null, drag: null, suppressClick: false, linkNet: null };
+const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, scope: { ch1: null, ch2: null }, note: null, drag: null, suppressClick: false, linkNet: null };
 let last = { R: 220, led: 'red', C: 100e-6, L: 10e-3 };
 let sim = null;
 const history = [];
@@ -1284,7 +1300,7 @@ function drawOverlay() {
       s += '<g class="ghost">' + partMarkup(tmp) + '</g>';
     }
   }
-  if (ui.hover && (PLACE.has(ui.tool) || ui.tool === 'meter')) {
+  if (ui.hover && (PLACE.has(ui.tool) || ui.tool === 'meter' || ui.tool === 'scope')) {
     const h = H(ui.hover);
     s += '<circle class="hover-ring" cx="' + h.x + '" cy="' + h.y + '" r="9"/>';
   }
@@ -1301,6 +1317,15 @@ function drawOverlay() {
       s += '<g><circle class="probe-black probe-ring" cx="' + hb.x + '" cy="' + hb.y + '" r="8"/><text class="probe-text" x="' + hb.x + '" y="' + (hb.y + 3.5) + '">−</text></g>';
     }
     s += '<g><circle class="probe-red probe-ring" cx="' + ha.x + '" cy="' + ha.y + '" r="8"/><text class="probe-text" x="' + ha.x + '" y="' + (ha.y + 3.5) + '">+</text></g>';
+  }
+  const sc = ui.scope;
+  if (sc.ch1) {
+    const h1 = H(sc.ch1);
+    s += '<g><circle class="probe-ch1 probe-ring" cx="' + h1.x + '" cy="' + h1.y + '" r="8"/><text class="probe-text" x="' + h1.x + '" y="' + (h1.y + 3.5) + '">1</text></g>';
+  }
+  if (sc.ch2) {
+    const h2 = H(sc.ch2);
+    s += '<g><circle class="probe-ch2 probe-ring" cx="' + h2.x + '" cy="' + h2.y + '" r="8"/><text class="probe-text" x="' + h2.x + '" y="' + (h2.y + 3.5) + '">2</text></g>';
   }
   gOver.innerHTML = s;
 }
@@ -1453,6 +1478,66 @@ function updateMeterCard() {
   if (box.dataset.h !== h) { box.dataset.h = h; box.innerHTML = h; }
 }
 
+function updateScope() {
+  const body = $('#scopeBody');
+  const ac = state.psu.mode === 'ac';
+  const sc = ui.scope;
+  if (!ac) {
+    body.innerHTML = '<div class="callout info">교류 모드로 바꾸면 파형을 볼 수 있어요.<br><button class="btn small" data-act="setMode" data-v="ac">교류(AC)로 전환</button></div>';
+    return;
+  }
+  if (!sc.ch1 && !sc.ch2) {
+    body.innerHTML = '<p class="muted" style="margin:0">도구함에서 <b>오실로스코프</b>를 고른 뒤, CH1·CH2 프로브를 꽂을 구멍을 차례로 클릭하세요. 두 채널 모두 <b>접지 기준 전압</b>을 보여줘요.</p>';
+    return;
+  }
+  body.innerHTML = '<div class="scope-wrap"><canvas id="scopeCanvas"></canvas></div><div class="scope-legend" id="scopeLegend"></div><div style="margin-top:8px"><button class="btn small" data-act="clearScope">측정 지우기</button></div>';
+  const canvas = $('#scopeCanvas');
+  const ctx = canvas && canvas.getContext && canvas.getContext('2d');
+  const freq = state.psu.freq || 1000, w = 2 * Math.PI * freq, win = 2 / freq;
+  const v1 = sc.ch1 ? netVolt(H(sc.ch1).net) : null;
+  const v2 = sc.ch2 ? netVolt(H(sc.ch2).net) : null;
+  const amp1 = v1 ? cabs(v1) : 0, amp2 = v2 ? cabs(v2) : 0;
+  const vmax = Math.max(amp1, amp2, 0.001) * 1.2;
+  if (ctx) {
+    const W = canvas.clientWidth || 560, HH = 160;
+    canvas.width = W; canvas.height = HH;
+    ctx.clearRect(0, 0, W, HH);
+    const cs = getComputedStyle(document.documentElement);
+    const grid = cs.getPropertyValue('--scope-grid').trim() || '#888';
+    ctx.strokeStyle = grid; ctx.lineWidth = 1;
+    const cols = 10, rows = 8;
+    for (let i = 0; i <= cols; i++) { const x = (i / cols) * W; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, HH); ctx.stroke(); }
+    for (let j = 0; j <= rows; j++) { const y = (j / rows) * HH; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(0, HH / 2); ctx.lineTo(W, HH / 2); ctx.stroke();
+    const yOf = v => HH / 2 - (v / vmax) * (HH / 2 - 6);
+    const drawTrace = (vph, colorVar) => {
+      if (!vph) return;
+      ctx.strokeStyle = cs.getPropertyValue(colorVar).trim(); ctx.lineWidth = 2.2; ctx.beginPath();
+      const N = 200;
+      for (let k = 0; k <= N; k++) {
+        const t = (k / N) * win;
+        const vt = cabs(vph) * Math.cos(w * t + cphase(vph));
+        const x = (k / N) * W, y = yOf(vt);
+        if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    };
+    drawTrace(v1, '--scope-ch1');
+    drawTrace(v2, '--scope-ch2');
+  }
+  const legend = $('#scopeLegend');
+  if (legend) {
+    let h = '';
+    if (v1) h += '<span><span class="scope-dot" style="background:var(--scope-ch1)"></span>CH1 ' + fmtV(amp1) + ' (진폭)</span>';
+    if (v2) h += '<span><span class="scope-dot" style="background:var(--scope-ch2)"></span>CH2 ' + fmtV(amp2) + ' (진폭)</span>';
+    if (v1 && v2) {
+      const dphi = phaseDiffDeg(v2, v1);
+      h += '<span>위상차 ' + fmtPhase(Math.abs(dphi)) + (dphi > 0.05 ? ' (CH2가 CH1보다 앞서요)' : dphi < -0.05 ? ' (CH2가 CH1보다 뒤져요)' : ' (위상 같음)') + '</span>';
+    }
+    legend.innerHTML = h;
+  }
+}
+
 function updateNoteCard() {
   const c = $('#noteCard');
   if (!ui.note) { c.hidden = true; return; }
@@ -1465,6 +1550,7 @@ function hintText() {
   if (t === 'select') return '부품을 클릭하면 값과 전압·전류가 나와요. 스위치는 눌러서 켜고 끌 수 있고, 선택한 부품 끝의 ○를 끌어 옮길 수 있어요.';
   if (t === 'erase') return '지울 부품을 클릭하세요.';
   if (t === 'meter') return ui.meter.a && !ui.meter.b ? '검정 프로브를 꽂을 두 번째 구멍을 클릭하세요.' : '빨간 프로브를 꽂을 구멍을 클릭하세요. 두 지점 사이의 전압을 재요.';
+  if (t === 'scope') return ui.scope.ch1 && !ui.scope.ch2 ? 'CH2(청록) 프로브를 꽂을 구멍을 클릭하세요.' : 'CH1(주황) 프로브를 꽂을 구멍을 클릭하세요. 접지 기준 전압 파형을 보여줘요.';
   if (!ui.pending) return t === 'led' ? 'LED: 양극(+, 긴 다리) 구멍을 먼저 클릭하세요.' : TYPE_NAME[t] + ': 첫 번째 구멍을 클릭하세요.';
   return t === 'led' ? '음극(−) 구멍을 클릭하세요. (Esc: 취소)' : '두 번째 구멍을 클릭하세요. (Esc: 취소)';
 }
@@ -1491,6 +1577,7 @@ function refresh(structural) {
   drawOverlay();
   updateAlerts();
   updateMeterCard();
+  updateScope();
   updateNoteCard();
   if (structural) renderInspector();
   updateInspectorNumbers();
@@ -1530,14 +1617,14 @@ function loadPreset(id) {
     state.parts.push(newPart(d.type, d.a, d.b, extra));
   });
   state.psu = { on: true, V: pr.V, fuse: false, mode: pr.mode || 'dc', freq: pr.freq || 1000 };
-  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null };
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null };
   ui.note = { name: pr.name, text: pr.note };
   refresh(true);
 }
 function clearAll() {
   pushHistory();
   state.parts = []; state.counters = {}; state.seq = 0; state.psu.fuse = false;
-  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.note = null;
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.note = null;
   refresh(true);
 }
 
@@ -1596,7 +1683,7 @@ function importCircuit(text) {
     mode: o.psu && o.psu.mode === 'ac' ? 'ac' : 'dc',
     freq: (f >= F_MIN && f <= F_MAX) ? f : 1000
   };
-  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.note = null;
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.note = null;
   refresh(true);
   toast(!state.parts.length ? '불러올 부품이 없어요.' : skipped ? '회로를 불러왔어요. (겹치거나 잘못된 부품 ' + skipped + '개는 제외)' : '회로를 불러왔어요.');
 }
@@ -1697,6 +1784,12 @@ svg.addEventListener('click', e => {
     refresh(false);
     return;
   }
+  if (t === 'scope') {
+    if (!ui.scope.ch1 || ui.scope.ch2) ui.scope = { ch1: hole.id, ch2: null };
+    else if (hole.id !== ui.scope.ch1) ui.scope.ch2 = hole.id;
+    refresh(false);
+    return;
+  }
   if (PLACE.has(t)) {
     const occ = occupiedBy(hole.id);
     if (occ) { toast('이미 ' + occ.name + '이(가) 꽂혀 있는 구멍이에요. 다른 구멍을 골라 주세요.'); return; }
@@ -1716,6 +1809,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if (ui.pending) { ui.pending = null; refresh(false); }
     else if (ui.meter.a) { ui.meter = { a: null, b: null }; refresh(false); }
+    else if (ui.scope.ch1) { ui.scope = { ch1: null, ch2: null }; refresh(false); }
     else if (ui.tool !== 'select') setTool('select');
     else if (ui.selected) select(null);
   } else if ((e.key === 'Delete' || e.key === 'Backspace') && ui.selected) {
@@ -1748,6 +1842,7 @@ document.addEventListener('click', e => {
     case 'fixId': { const p = getPart(b.dataset.id); if (p) { pushHistory(); p.burnt = false; refresh(true); } break; }
     case 'fuse': state.psu.fuse = false; refresh(true); break;
     case 'clearMeter': ui.meter = { a: null, b: null }; refresh(false); break;
+    case 'clearScope': ui.scope = { ch1: null, ch2: null }; refresh(false); break;
     case 'closeNote': ui.note = null; refresh(false); break;
     case 'setMode': pushHistory(); state.psu.mode = v; refresh(true); break;
     case 'setFreq': pushHistory(); state.psu.freq = +v; fIn.value = fmtFin(+v); finHelp(''); refresh(false); break;
