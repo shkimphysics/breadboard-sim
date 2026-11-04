@@ -7,7 +7,7 @@ const G = api.buildGeometry();
 function load(preset, over) {
   let n = 1;
   const parts = preset.parts.map(p => Object.assign({ id: 'p' + (n++), burnt: false }, p));
-  return { parts, psu: { on: true, V: (over && over.V) || preset.V, fuse: false } };
+  return { parts, psu: { on: true, V: (over && over.V) || preset.V, fuse: false, mode: preset.mode || 'dc', freq: preset.freq || 1000 } };
 }
 function run(id, over) {
   const preset = api.PRESETS.find(p => p.id === id);
@@ -154,6 +154,12 @@ check('고장 후 전류', Math.abs(r.res.parts.p2.i), 0, 1e-9);
   check('LED 교류 전류=0', api.cabs(out.parts.l.i), 0, 1e-9);
   console.log('LED AC unsupported=', out.parts.l.unsupported);
 }
+
+// 교류 RC 저역통과 필터 예제(오실로스코프 연결 포함)
+r = run('ac-rc-scope');
+check('AC RC 필터 전류 진폭(mA)', api.cabs(r.res.parts.p2.i) * 1000, 5.2, 5.4);
+check('AC RC 필터 출력(축전기) 전압 진폭(V)', api.cabs(r.res.parts.p3.v), 8.3, 8.6);
+check('AC RC 필터 출력 위상 지연(deg)', api.cphase(r.res.parts.p3.v) * 180 / Math.PI, -32.5, -31.8);
 
 console.log(api.fmtR(4700), api.fmtR(220), api.fmtR(1e6), api.fmtI(0.0214), api.fmtI(0.5), api.fmtI(2e-5), api.fmtP(0.0456));
 console.log('띠 220', api.resistorBands(220), '띠 4.7k', api.resistorBands(4700), '띠 1k', api.resistorBands(1000), '띠 4.7', api.resistorBands(4.7));

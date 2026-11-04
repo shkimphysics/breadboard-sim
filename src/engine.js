@@ -473,5 +473,15 @@ const PRESETS = [
       { type: 'resistor', R: 1000, a: 'e2', b: 'e16' },
       { type: 'inductor', L: 10e-3, a: 'a16', b: 'a20' },
       { type: 'wire', a: 'b20', b: 'rt-:14' }]
+  },
+  {
+    id: 'ac-rc-scope', name: '교류 RC 저역통과 필터 (오실로스코프)', V: 10, mode: 'ac', freq: 1000,
+    note: 'R(1 kΩ)과 C(100 nF)를 직렬로 연결한 저역통과 필터예요. 오실로스코프 CH1(주황)은 입력 전압(진폭 10V), CH2(청록)는 축전기에 걸리는 출력 전압을 보여줘요. 1000Hz에서는 출력 진폭이 약 8.47V로 줄고, 입력보다 위상이 약 32.1° 뒤처져요. 주파수를 더 높여 보면 출력이 더 작아지고 더 많이 뒤처지는 걸(고주파를 막는 "저역통과") 눈으로 볼 수 있어요.',
+    parts: [
+      { type: 'wire', a: 'rt+:1', b: 'a2' },
+      { type: 'resistor', R: 1000, a: 'b2', b: 'b7' },
+      { type: 'capacitor', C: 100e-9, a: 'c7', b: 'c11' },
+      { type: 'wire', a: 'a11', b: 'rt-:9' }],
+    scope: { ch1: 'c2', ch2: 'd7' }
   }
 ];

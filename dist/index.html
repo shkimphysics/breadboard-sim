@@ -271,7 +271,7 @@ svg.no-flow .flow{display:none}
   <header class="top">
     <div class="brand">
       <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true"><rect x="1" y="1" width="32" height="32" rx="8" fill="var(--accent)"/><g fill="var(--accent-ink)"><circle cx="10" cy="11" r="2"/><circle cx="17" cy="11" r="2"/><circle cx="24" cy="11" r="2"/><circle cx="10" cy="17" r="2"/><circle cx="17" cy="17" r="2"/><circle cx="24" cy="17" r="2"/></g><path d="M8 24h6l2-4 3 8 2-4h5" fill="none" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-      <div><h1>브레드보드 시뮬레이터</h1><p>통합과학2 · 전기 회로 실험</p></div>
+      <div><h1>브레드보드 시뮬레이터</h1><p>전기 회로 실험</p></div>
     </div>
     <div class="top-actions">
       <select id="presetSel" class="btn" aria-label="예제 회로 불러오기"></select>
@@ -857,6 +857,16 @@ const PRESETS = [
       { type: 'resistor', R: 1000, a: 'e2', b: 'e16' },
       { type: 'inductor', L: 10e-3, a: 'a16', b: 'a20' },
       { type: 'wire', a: 'b20', b: 'rt-:14' }]
+  },
+  {
+    id: 'ac-rc-scope', name: '교류 RC 저역통과 필터 (오실로스코프)', V: 10, mode: 'ac', freq: 1000,
+    note: 'R(1 kΩ)과 C(100 nF)를 직렬로 연결한 저역통과 필터예요. 오실로스코프 CH1(주황)은 입력 전압(진폭 10V), CH2(청록)는 축전기에 걸리는 출력 전압을 보여줘요. 1000Hz에서는 출력 진폭이 약 8.47V로 줄고, 입력보다 위상이 약 32.1° 뒤처져요. 주파수를 더 높여 보면 출력이 더 작아지고 더 많이 뒤처지는 걸(고주파를 막는 "저역통과") 눈으로 볼 수 있어요.',
+    parts: [
+      { type: 'wire', a: 'rt+:1', b: 'a2' },
+      { type: 'resistor', R: 1000, a: 'b2', b: 'b7' },
+      { type: 'capacitor', C: 100e-9, a: 'c7', b: 'c11' },
+      { type: 'wire', a: 'a11', b: 'rt-:9' }],
+    scope: { ch1: 'c2', ch2: 'd7' }
   }
 ];
 
@@ -1617,7 +1627,8 @@ function loadPreset(id) {
     state.parts.push(newPart(d.type, d.a, d.b, extra));
   });
   state.psu = { on: true, V: pr.V, fuse: false, mode: pr.mode || 'dc', freq: pr.freq || 1000 };
-  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null };
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null };
+  ui.scope = pr.scope ? { ch1: pr.scope.ch1, ch2: pr.scope.ch2 } : { ch1: null, ch2: null };
   ui.note = { name: pr.name, text: pr.note };
   refresh(true);
 }
