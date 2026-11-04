@@ -246,7 +246,7 @@ svg.no-flow .flow{display:none}
 .probe-ch1{fill:var(--scope-ch1)}
 .probe-ch2{fill:var(--scope-ch2)}
 .scope-wrap{background:var(--panel-2);border-radius:8px;padding:8px}
-#scopeCanvas{display:block;width:100%;height:160px}
+#scopeCanvas,#transientCanvas{display:block;width:100%;height:160px}
 .scope-legend{display:flex;gap:14px;flex-wrap:wrap;font:500 12.5px var(--mono);margin-top:8px}
 .scope-legend span{display:inline-flex;align-items:center;gap:5px}
 .scope-dot{width:9px;height:9px;border-radius:50%;display:inline-block}
@@ -430,7 +430,7 @@ const PLACE = new Set(['wire', 'resistor', 'led', 'bulb', 'switch', 'ammeter', '
 
 /* ----- 상태 ----- */
 const state = { parts: [], psu: { on: true, V: 5, fuse: false, mode: 'dc', freq: 1000 }, seq: 0, counters: {}, settings: { flow: true, color: true, faults: true, resName: true, resValue: true } };
-const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, scope: { ch1: null, ch2: null }, note: null, drag: null, suppressClick: false, linkNet: null };
+const ui = { tool: 'select', selected: null, pending: null, hover: null, meter: { a: null, b: null }, scope: { ch1: null, ch2: null }, transient: null, note: null, drag: null, suppressClick: false, linkNet: null };
 let last = { R: 220, led: 'red', C: 100e-6, L: 10e-3 };
 let sim = null;
 const history = [];
@@ -905,15 +905,18 @@ function renderInspector() {
     h += '<div class="field"><span class="lab">이름</span><div class="numin"><input type="text" id="inpName" maxlength="16" value="' + esc(p.name) + '" aria-label="축전기 이름"></div></div>';
     h += '<div class="field"><span class="lab">정전용량</span><div class="numin"><input type="number" id="inpC" min="0.000001" step="any" value="' + (p.C * 1e6) + '" aria-label="정전용량(마이크로패럿)"><span class="muted">µF</span></div><div class="chips" id="cChips">' +
       C_CHIPS.map(v => '<button class="chip" data-act="setC" data-v="' + v + '" aria-pressed="' + (v === p.C) + '">' + fmtC(v) + '</button>').join('') + '</div></div>';
+    if (state.psu.mode !== 'ac') h += '<div class="field"><button class="btn small" data-act="runTransient">충전 곡선 보기</button></div>';
   } else if (p.type === 'inductor') {
     h += '<div class="field"><span class="lab">이름</span><div class="numin"><input type="text" id="inpName" maxlength="16" value="' + esc(p.name) + '" aria-label="인덕터 이름"></div></div>';
     h += '<div class="field"><span class="lab">인덕턴스</span><div class="numin"><input type="number" id="inpL" min="0.001" step="any" value="' + (p.L * 1e3) + '" aria-label="인덕턴스(밀리헨리)"><span class="muted">mH</span></div><div class="chips" id="lChips">' +
       L_CHIPS.map(v => '<button class="chip" data-act="setL" data-v="' + v + '" aria-pressed="' + (v === p.L) + '">' + fmtL(v) + '</button>').join('') + '</div></div>';
+    if (state.psu.mode !== 'ac') h += '<div class="field"><button class="btn small" data-act="runTransient">전류 변화 곡선 보기</button></div>';
   }
   const ac = state.psu.mode === 'ac';
   h += '<dl class="meas"><div><dt>전압 V</dt><dd data-m="v">–</dd></div><div><dt>전류 I</dt><dd data-m="i">–</dd></div><div><dt>전력 P</dt><dd data-m="p">–</dd></div>' +
     (ac ? '<div><dt>위상차 φ</dt><dd data-m="phi">–</dd></div>' : '') + '</dl>';
   h += '<div class="formula" data-m="formula"></div><div data-m="warn"></div>';
+  h += '<div id="transientResult" hidden><div class="scope-wrap"><canvas id="transientCanvas"></canvas></div><div class="scope-legend" id="transientLegend"></div></div>';
   h += '<p class="muted" style="margin:10px 0 0;font-size:12px">꽂힌 위치 ' + p.a + ' → ' + p.b + '</p>';
   box.innerHTML = h;
 }
@@ -997,6 +1000,9 @@ function updateAlerts() {
   });
   if (ac && state.parts.some(p => p.type === 'led')) {
     h += '<div class="callout warn">교류 모드에서는 LED를 지나는 전류를 계산하지 않아요(비선형 소자라 지원하지 않음). LED 동작은 직류 모드에서 확인하세요.</div>';
+  }
+  if (ui.transient && state.parts.some(p => p.type === 'led')) {
+    h += '<div class="callout warn">충전·방전 곡선 계산에서는 LED를 지나는 전류를 계산하지 않아요(비선형 소자라 지원하지 않음).</div>';
   }
   if (!state.psu.fuse && state.parts.length) {
     if (!state.psu.on) h += '<div class="callout info">전원이 꺼져 있어요. 오른쪽 위 스위치를 켜 보세요.</div>';
@@ -1100,6 +1106,79 @@ function updateScope() {
   }
 }
 
+function transientSig() {
+  return JSON.stringify([state.psu.V, state.psu.on, state.psu.fuse,
+    state.parts.map(p => [p.id, p.type, p.R, p.C, p.L, p.closed ? 1 : 0, p.burnt ? 1 : 0])]);
+}
+function updateTransientGraph() {
+  const box = $('#transientResult');
+  if (!box) return;
+  const p = sel();
+  const tr = ui.transient;
+  if (!p || !tr || tr.partId !== p.id || tr.sig !== transientSig()) { box.hidden = true; return; }
+  box.hidden = false;
+  const res = tr.result;
+  const isV = p.type === 'capacitor';
+  const series = isV ? res.parts[p.id].v : res.parts[p.id].i;
+  const finalVal = isV ? res.final.parts[p.id].v : res.final.parts[p.id].i;
+  const t = res.t;
+  const v0 = series[0];
+  const crossTime = frac => {
+    const target = v0 + (finalVal - v0) * frac;
+    const rising = finalVal >= v0;
+    for (let k = 1; k < series.length; k++) {
+      if (rising ? series[k] >= target : series[k] <= target) {
+        const s0 = series[k - 1], s1 = series[k];
+        const f = s1 === s0 ? 0 : (target - s0) / (s1 - s0);
+        return t[k - 1] + f * (t[k] - t[k - 1]);
+      }
+    }
+    return t[t.length - 1];
+  };
+  const tau = crossTime(0.632), t95 = crossTime(0.95), t99 = crossTime(0.99);
+  const tLast = t[t.length - 1];
+  const vMin = Math.min.apply(null, series.concat([finalVal, v0]));
+  const vMax = Math.max.apply(null, series.concat([finalVal, v0]));
+  const pad = Math.max((vMax - vMin) * 0.15, Math.abs(vMax) * 0.05, 1e-12);
+  const yLo = vMin - pad, yHi = vMax + pad;
+  const canvas = $('#transientCanvas');
+  const ctx = canvas && canvas.getContext && canvas.getContext('2d');
+  if (ctx) {
+    const W = canvas.clientWidth || 560, HH = 160;
+    canvas.width = W; canvas.height = HH;
+    ctx.clearRect(0, 0, W, HH);
+    const cs = getComputedStyle(document.documentElement);
+    const grid = cs.getPropertyValue('--scope-grid').trim() || '#888';
+    ctx.strokeStyle = grid; ctx.lineWidth = 1;
+    const cols = 10, rows = 8;
+    for (let i = 0; i <= cols; i++) { const x = (i / cols) * W; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, HH); ctx.stroke(); }
+    for (let j = 0; j <= rows; j++) { const y = (j / rows) * HH; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+    const xOf = tt => tLast > 0 ? (tt / tLast) * W : 0;
+    const yOf = vv => yHi > yLo ? HH - ((vv - yLo) / (yHi - yLo)) * HH : HH / 2;
+    ctx.setLineDash([4, 4]); ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(0, yOf(finalVal)); ctx.lineTo(W, yOf(finalVal)); ctx.stroke();
+    [tau, 5 * tau].forEach(tt => { if (tt > 0 && tt <= tLast) { ctx.beginPath(); ctx.moveTo(xOf(tt), 0); ctx.lineTo(xOf(tt), HH); ctx.stroke(); } });
+    ctx.setLineDash([]);
+    ctx.strokeStyle = cs.getPropertyValue('--scope-ch1').trim(); ctx.lineWidth = 2.2; ctx.beginPath();
+    for (let k = 0; k < t.length; k++) {
+      const x = xOf(t[k]), y = yOf(series[k]);
+      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const legend = $('#transientLegend');
+  if (legend) {
+    const fmtVal = isV ? fmtV : fmtI;
+    const fmtT = ss => ss >= 1 ? trimNum(ss) + ' s' : ss >= 1e-3 ? trimNum(ss * 1e3) + ' ms' : trimNum(ss * 1e6) + ' µs';
+    legend.innerHTML =
+      '<span><span class="scope-dot" style="background:var(--scope-ch1)"></span>τ(63.2%) ' + fmtT(tau) + '</span>' +
+      '<span>95% 도달 ' + fmtT(t95) + '</span>' +
+      '<span>99% 도달 ' + fmtT(t99) + '</span>' +
+      '<span>최종값 ' + fmtVal(finalVal) + '</span>' +
+      '<span>관찰 시간 0~' + fmtT(tLast) + '</span>';
+  }
+}
+
 function updateNoteCard() {
   const c = $('#noteCard');
   if (!ui.note) { c.hidden = true; return; }
@@ -1143,6 +1222,7 @@ function refresh(structural) {
   updateNoteCard();
   if (structural) renderInspector();
   updateInspectorNumbers();
+  updateTransientGraph();
   $('#hint').textContent = hintText();
   updateHover();
   save();
@@ -1179,7 +1259,7 @@ function loadPreset(id) {
     state.parts.push(newPart(d.type, d.a, d.b, extra));
   });
   state.psu = { on: true, V: pr.V, fuse: false, mode: pr.mode || 'dc', freq: pr.freq || 1000 };
-  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null };
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.transient = null;
   ui.scope = pr.scope ? { ch1: pr.scope.ch1, ch2: pr.scope.ch2 } : { ch1: null, ch2: null };
   ui.note = { name: pr.name, text: pr.note };
   refresh(true);
@@ -1187,7 +1267,7 @@ function loadPreset(id) {
 function clearAll() {
   pushHistory();
   state.parts = []; state.counters = {}; state.seq = 0; state.psu.fuse = false;
-  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.note = null;
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.transient = null; ui.note = null;
   refresh(true);
 }
 
@@ -1246,7 +1326,7 @@ function importCircuit(text) {
     mode: o.psu && o.psu.mode === 'ac' ? 'ac' : 'dc',
     freq: (f >= F_MIN && f <= F_MAX) ? f : 1000
   };
-  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.note = null;
+  ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.transient = null; ui.note = null;
   refresh(true);
   toast(!state.parts.length ? '불러올 부품이 없어요.' : skipped ? '회로를 불러왔어요. (겹치거나 잘못된 부품 ' + skipped + '개는 제외)' : '회로를 불러왔어요.');
 }
@@ -1406,6 +1486,11 @@ document.addEventListener('click', e => {
     case 'fuse': state.psu.fuse = false; refresh(true); break;
     case 'clearMeter': ui.meter = { a: null, b: null }; refresh(false); break;
     case 'clearScope': ui.scope = { ch1: null, ch2: null }; refresh(false); break;
+    case 'runTransient': {
+      const p = sel();
+      if (p) { ui.transient = { partId: p.id, result: solveCircuitTransient(state.parts, state.psu, G), sig: transientSig() }; refresh(false); }
+      break;
+    }
     case 'closeNote': ui.note = null; refresh(false); break;
     case 'setMode': pushHistory(); state.psu.mode = v; refresh(true); break;
     case 'setFreq': pushHistory(); state.psu.freq = +v; fIn.value = fmtFin(+v); finHelp(''); refresh(false); break;

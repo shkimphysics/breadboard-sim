@@ -322,6 +322,134 @@ function solveCircuit(parts, psu, G) {
   return out;
 }
 
+/* 과도상태(충전·방전 곡선): 후진 오일러(backward Euler) + companion model.
+   t=0에 전원을 막 켠 상태(축전기 0V, 인덕터 0A)에서 시작해 이미 정확히 알고 있는
+   DC 정상상태(solveCircuit)에 수렴할 때까지의 전체 시계열을 한 번에 계산해 돌려준다. */
+function solveCircuitTransient(parts, psu, G, opts) {
+  opts = opts || {};
+  const N_STEPS = opts.steps || 400;
+  const MAX_DOUBLINGS = opts.maxDoublings || 30;
+  const TOL = opts.tol || 0.02;
+  // LED는 과도상태 스테핑에서 개방 취급하므로(비선형이라 지원 안 함), 수렴 목표도
+  // LED를 뺀 회로로 계산해야 같은 물리를 비교하게 된다(안 그러면 LED가 전류를 나눠 갖는
+  // 회로에서 영원히 수렴 안 하거나 엉뚱한 값에 수렴할 수 있음).
+  const dcFinal = solveCircuit(parts.filter(p => p.type !== 'led'), psu, G);
+  const caps = parts.filter(p => p.type === 'capacitor');
+  const inds = parts.filter(p => p.type === 'inductor');
+
+  function stepOnce(Vprev, Iprev, h) {
+    const idxMap = new Map([[GROUND_NET, -1]]);
+    let n = 0;
+    const idx = net => { if (!idxMap.has(net)) idxMap.set(net, n++); return idxMap.get(net); };
+    const psuOn = !!(psu.on && !psu.fuse);
+    if (psuOn) idx('RT+');
+    const rs = [], info = {};
+    for (const p of parts) {
+      const na = G.holes[p.a].net, nb = G.holes[p.b].net;
+      const ia = idx(na), ib = idx(nb);
+      const same = na === nb;
+      info[p.id] = { same };
+      if (p.type === 'led' || same) continue;
+      let g = 0, I0 = 0;
+      if (p.type === 'wire') g = 1 / E.R_WIRE;
+      else if (p.type === 'resistor') g = 1 / Math.max(p.R, 1e-3);
+      else if (p.type === 'bulb') { if (!p.burnt) g = 1 / Math.max(p.R, 1e-3); }
+      else if (p.type === 'switch') { if (p.closed) g = 1 / E.R_SWITCH; }
+      else if (p.type === 'ammeter') g = 1 / E.R_AMM;
+      else if (p.type === 'capacitor') { g = p.C / h; I0 = -g * Vprev[p.id]; }
+      else if (p.type === 'inductor') { g = h / Math.max(p.L, 1e-15); I0 = Iprev[p.id]; }
+      if (g > 0) rs.push({ ia, ib, g, I0 });
+    }
+    const N = n;
+    const A = Array.from({ length: N }, () => new Array(N).fill(0));
+    const z = new Array(N).fill(0);
+    const stampG = (i, j, g) => { if (i >= 0) A[i][i] += g; if (j >= 0) A[j][j] += g; if (i >= 0 && j >= 0) { A[i][j] -= g; A[j][i] -= g; } };
+    const stampI = (i, j, I) => { if (i >= 0) z[i] -= I; if (j >= 0) z[j] += I; };
+    for (let i = 0; i < N; i++) A[i][i] += E.GMIN;
+    for (const r of rs) { stampG(r.ia, r.ib, r.g); if (r.I0) stampI(r.ia, r.ib, r.I0); }
+    const gInt = 1 / E.R_INT;
+    if (psuOn) { const i = idxMap.get('RT+'); A[i][i] += gInt; z[i] += psu.V * gInt; }
+    const V = N ? solveLinear(A, z) : [];
+    const vOf = net => { const i = idxMap.get(net); return i === undefined || i < 0 ? 0 : V[i]; };
+    const outParts = {};
+    for (const p of parts) {
+      const na = G.holes[p.a].net, nb = G.holes[p.b].net;
+      const v = vOf(na) - vOf(nb);
+      let i = 0;
+      if (p.type === 'led') { outParts[p.id] = { v, i: 0 }; continue; }
+      if (!info[p.id].same) {
+        if (p.type === 'wire') i = v / E.R_WIRE;
+        else if (p.type === 'resistor') i = v / Math.max(p.R, 1e-3);
+        else if (p.type === 'bulb') i = p.burnt ? 0 : v / Math.max(p.R, 1e-3);
+        else if (p.type === 'switch') i = p.closed ? v / E.R_SWITCH : 0;
+        else if (p.type === 'ammeter') i = v / E.R_AMM;
+        else if (p.type === 'capacitor') { const g = p.C / h; i = g * v - g * Vprev[p.id]; }
+        else if (p.type === 'inductor') { const g = h / Math.max(p.L, 1e-15); i = g * v + Iprev[p.id]; }
+      }
+      outParts[p.id] = { v, i };
+    }
+    const vt = vOf('RT+');
+    const isup = psuOn ? gInt * (psu.V - vt) : 0;
+    return { parts: outParts, supply: { V: vt, I: isup } };
+  }
+
+  function runAttempt(duration) {
+    const h = duration / N_STEPS;
+    const Vprev = {}, Iprev = {};
+    caps.forEach(p => { Vprev[p.id] = 0; });
+    inds.forEach(p => { Iprev[p.id] = 0; });
+    const t = [], partsOut = {}, supplyV = [], supplyI = [];
+    parts.forEach(p => { partsOut[p.id] = { v: [], i: [] }; });
+    let firstRes = null;
+    for (let k = 1; k <= N_STEPS; k++) {
+      const res = stepOnce(Vprev, Iprev, h);
+      if (k === 1) firstRes = res;
+      caps.forEach(p => { Vprev[p.id] = res.parts[p.id].v; });
+      inds.forEach(p => { Iprev[p.id] = res.parts[p.id].i; });
+      t.push(k * h);
+      parts.forEach(p => { partsOut[p.id].v.push(res.parts[p.id].v); partsOut[p.id].i.push(res.parts[p.id].i); });
+      supplyV.push(res.supply.V); supplyI.push(res.supply.I);
+    }
+    t.unshift(0);
+    parts.forEach(p => {
+      const v0 = p.type === 'capacitor' ? 0 : (firstRes ? firstRes.parts[p.id].v : 0);
+      const i0 = p.type === 'inductor' ? 0 : (firstRes ? firstRes.parts[p.id].i : 0);
+      partsOut[p.id].v.unshift(v0);
+      partsOut[p.id].i.unshift(i0);
+    });
+    supplyV.unshift(firstRes ? firstRes.supply.V : 0);
+    supplyI.unshift(firstRes ? firstRes.supply.I : 0);
+    return { t, parts: partsOut, supply: { V: supplyV, I: supplyI } };
+  }
+
+  let duration = opts.seedT || 1e-3;
+  let attempt = runAttempt(duration);
+  let converged = (caps.length === 0 && inds.length === 0);
+  let doublings = 0;
+  for (; !converged && doublings < MAX_DOUBLINGS; doublings++) {
+    let ok = true;
+    const lastV = id => attempt.parts[id].v[attempt.parts[id].v.length - 1];
+    const lastI = id => attempt.parts[id].i[attempt.parts[id].i.length - 1];
+    for (const p of caps) {
+      const swing = Math.max(Math.abs(dcFinal.parts[p.id].v), 1e-9);
+      if (Math.abs(lastV(p.id) - dcFinal.parts[p.id].v) > TOL * swing) { ok = false; break; }
+    }
+    if (ok) for (const p of inds) {
+      const swing = Math.max(Math.abs(dcFinal.parts[p.id].i), 1e-9);
+      if (Math.abs(lastI(p.id) - dcFinal.parts[p.id].i) > TOL * swing) { ok = false; break; }
+    }
+    if (ok) { converged = true; break; }
+    duration *= 2;
+    attempt = runAttempt(duration);
+  }
+  attempt.final = dcFinal;
+  attempt.duration = duration;
+  attempt.steps = N_STEPS;
+  attempt.doublings = doublings;
+  attempt.converged = converged;
+  return attempt;
+}
+
 /* 고장(과전류) 처리까지 포함 */
 function simulate(parts, psu, G, opts) {
   if (psu.mode === 'ac') return { res: solveCircuitAC(parts, psu, G, psu.freq || 1000), events: [] };

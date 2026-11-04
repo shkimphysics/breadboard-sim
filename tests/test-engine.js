@@ -1,7 +1,7 @@
 const fs = require('fs');
 const dir = __dirname + '/../src/';
 const code = fs.readFileSync(dir + 'engine.js', 'utf8');
-const api = new Function(code + '\nreturn {buildGeometry,simulate,solveCircuit,solveCircuitAC,PRESETS,fmtR,fmtV,fmtI,fmtP,resistorBands,cabs,cphase};')();
+const api = new Function(code + '\nreturn {buildGeometry,simulate,solveCircuit,solveCircuitAC,solveCircuitTransient,PRESETS,fmtR,fmtV,fmtI,fmtP,resistorBands,cabs,cphase};')();
 const G = api.buildGeometry();
 
 function load(preset, over) {
@@ -160,6 +160,45 @@ r = run('ac-rc-scope');
 check('AC RC 필터 전류 진폭(mA)', api.cabs(r.res.parts.p2.i) * 1000, 5.2, 5.4);
 check('AC RC 필터 출력(축전기) 전압 진폭(V)', api.cabs(r.res.parts.p3.v), 8.3, 8.6);
 check('AC RC 필터 출력 위상 지연(deg)', api.cphase(r.res.parts.p3.v) * 180 / Math.PI, -32.5, -31.8);
+
+// ===== 과도상태(충전·방전 곡선) =====
+function nearestIdx(tArr, target) { let bi = 0, bd = Infinity; for (let i = 0; i < tArr.length; i++) { const d = Math.abs(tArr[i] - target); if (d < bd) { bd = d; bi = i; } } return bi; }
+// 학생이 질문한 바로 그 회로: R=10kΩ, C=1mF, V=10V → τ=RC=10s
+{
+  const parts = [{ id: 'w', type: 'wire', a: 'rt+:1', b: 'a5' }, { id: 'r', type: 'resistor', R: 10000, a: 'a5', b: 'a9' }, { id: 'c', type: 'capacitor', C: 1e-3, a: 'a9', b: 'rt-:1' }];
+  const psu = { on: true, V: 10, fuse: false, mode: 'dc' };
+  const out = api.solveCircuitTransient(parts, psu, G);
+  const tau = 10000 * 1e-3, i0 = 10 / 10000;
+  const i1 = nearestIdx(out.t, tau), i5 = nearestIdx(out.t, 5 * tau);
+  check('RC 충전(t≈τ) 전류 비율(기대 0.368)', out.parts.r.i[i1] / i0, 0.35, 0.38);
+  check('RC 충전(t≈τ) 축전기전압 비율(기대 0.632)', out.parts.c.v[i1] / 10, 0.61, 0.66);
+  check('RC 충전(t≈5τ) 전류 비율(기대 ~0)', Math.abs(out.parts.r.i[i5] / i0), 0, 0.01);
+  check('RC 충전(t≈5τ) 축전기전압 비율(기대 ~1)', out.parts.c.v[i5] / 10, 0.98, 1.01);
+  if (!out.converged) fail++;
+  check('RC 관찰시간(5τ~60τ 사이)', out.duration, 5 * tau, 60 * tau);
+}
+// RL: R=100Ω, L=1H, V=5V → τ=L/R=10ms
+{
+  const parts = [{ id: 'w', type: 'wire', a: 'rt+:1', b: 'a5' }, { id: 'r', type: 'resistor', R: 100, a: 'a5', b: 'a9' }, { id: 'l', type: 'inductor', L: 1, a: 'a9', b: 'rt-:1' }];
+  const psu = { on: true, V: 5, fuse: false, mode: 'dc' };
+  const out = api.solveCircuitTransient(parts, psu, G);
+  const tau = 1 / 100, iFinal = 5 / 100;
+  const i1 = nearestIdx(out.t, tau), i5 = nearestIdx(out.t, 5 * tau);
+  check('RL 충전(t≈τ) 인덕터전류 비율(기대 0.632)', out.parts.l.i[i1] / iFinal, 0.60, 0.66);
+  check('RL 충전(t≈5τ) 인덕터전류 비율(기대 ~1)', out.parts.l.i[i5] / iFinal, 0.98, 1.01);
+  if (!out.converged) fail++;
+}
+// rc-rl-dc 예제 전체: 서로 다른 시정수를 가진 두 가지가 섞여도 각자 수렴하는지(일반 스테퍼의 핵심 근거)
+{
+  const pr = api.PRESETS.find(p => p.id === 'rc-rl-dc');
+  const parts = pr.parts.map((d, i) => Object.assign({ id: 'p' + (i + 1), burnt: false }, d));
+  const psu = { on: true, V: pr.V, fuse: false, mode: 'dc' };
+  const out = api.solveCircuitTransient(parts, psu, G);
+  if (!out.converged) fail++;
+  check('rc-rl-dc 과도상태 최종 전류 R1가지(기대≈0, 초기 10mA 대비 2% 수렴오차 이내)', Math.abs(out.parts.p2.i[out.parts.p2.i.length - 1]), 0, 2e-4);
+  check('rc-rl-dc 과도상태 최종 전류 R2가지(기대≈10mA)', out.parts.p6.i[out.parts.p6.i.length - 1], 0.0098, 0.0101);
+  console.log('rc-rl-dc 과도상태 duration', out.duration, 'doublings', out.doublings);
+}
 
 console.log(api.fmtR(4700), api.fmtR(220), api.fmtR(1e6), api.fmtI(0.0214), api.fmtI(0.5), api.fmtI(2e-5), api.fmtP(0.0456));
 console.log('띠 220', api.resistorBands(220), '띠 4.7k', api.resistorBands(4700), '띠 1k', api.resistorBands(1000), '띠 4.7', api.resistorBands(4.7));
