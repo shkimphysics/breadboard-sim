@@ -239,8 +239,23 @@ $('#btnSaveCircuit').click();
 ok(savedBlob !== null, '저장 시 Blob 생성: ' + text('#toast'));
 w.URL.createObjectURL = origCreateObjectURL;
 
+$('#circuitNameInput').value = '테스트 회로/이름';
+$('#circuitNameInput').dispatchEvent(new w.Event('input', { bubbles: true }));
+let savedFilename = null;
+const origCreateObjectURL2 = w.URL.createObjectURL;
+w.URL.createObjectURL = function (b) { return 'blob:test2'; };
+const origAppendChild = w.document.body.appendChild.bind(w.document.body);
+w.document.body.appendChild = function (el) { if (el.tagName === 'A' && el.download) savedFilename = el.download; return origAppendChild(el); };
+$('#btnSaveCircuit').click();
+w.document.body.appendChild = origAppendChild;
+w.URL.createObjectURL = origCreateObjectURL2;
+ok(!!savedFilename && savedFilename.indexOf('테스트 회로이름') === 0, '회로 이름이 파일명에 반영(특수문자 제거): ' + savedFilename);
+$('#btnClear').click(); $('#btnClear').click();
+ok($('#circuitNameInput').value === '', '모두 지우기 시 회로 이름도 초기화');
+
 const circuitJSON = JSON.stringify({
   format: 'breadboard-sim-circuit', version: 1,
+  name: '불러온회로',
   psu: { V: 8 },
   parts: [
     { type: 'wire', a: 'rt+:2', b: 'a3' },
@@ -257,6 +272,7 @@ setTimeout(() => {
   ok($$('.part').length === 4, 'JSON 불러오기 부품 4개: ' + $$('.part').length);
   ok(text('#psuV') === '8.0 V', 'JSON 불러오기 전압 8V: ' + text('#psuV'));
   ok(/320|320\.0/.test(text('#sR')) || /0\.32|320/.test(text('#sR')), 'JSON 불러오기 저항 320 Ω: ' + text('#sR'));
+  ok($('#circuitNameInput').value === '불러온회로', 'JSON 불러오기 시 회로 이름 복원: ' + $('#circuitNameInput').value);
 
   Object.defineProperty(fileInput, 'files', { value: [new w.File(['이것은 JSON이 아님'], 'bad.json', { type: 'application/json' })], configurable: true });
   fileInput.dispatchEvent(new w.Event('change', { bubbles: true }));

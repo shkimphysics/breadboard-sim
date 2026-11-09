@@ -78,6 +78,8 @@ button{cursor:pointer}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px}
 .btn{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 12px;min-height:34px;font-weight:500}
 .btn:hover{background:var(--panel-2)}
+.name-input{border:1px solid var(--line);background:var(--panel);border-radius:8px;padding:6px 10px;min-height:34px;font-size:13px;width:130px;color:var(--fg)}
+.name-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
 .btn.danger{color:var(--bad);border-color:var(--bad)}
 .btn.small{min-height:28px;padding:3px 10px;font-size:13px}
@@ -279,6 +281,7 @@ svg.no-flow .flow{display:none}
     </div>
     <div class="top-actions">
       <select id="presetSel" class="btn" aria-label="예제 회로 불러오기"></select>
+      <input type="text" id="circuitNameInput" class="name-input" placeholder="회로 이름(선택)" maxlength="40" aria-label="저장할 회로 이름">
       <button class="btn" id="btnSaveCircuit" title="지금 회로를 JSON 파일로 저장">회로 저장</button>
       <button class="btn" id="btnLoadCircuit" title="JSON 파일에서 회로 불러오기">회로 불러오기</button>
       <input type="file" id="fileLoadCircuit" accept=".json,application/json" aria-hidden="true" hidden>
@@ -1890,21 +1893,26 @@ function loadPreset(id) {
   ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.transient = null;
   ui.scope = pr.scope ? { ch1: pr.scope.ch1, ch2: pr.scope.ch2 } : { ch1: null, ch2: null };
   ui.note = { name: pr.name, text: pr.note };
+  const nameInput = $('#circuitNameInput'); if (nameInput) nameInput.value = pr.name;
   refresh(true);
 }
 function clearAll() {
   pushHistory();
   state.parts = []; state.counters = {}; state.seq = 0; state.psu.fuse = false;
   ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.transient = null; ui.note = null;
+  const circuitNameInput = $('#circuitNameInput'); if (circuitNameInput) circuitNameInput.value = '';
   refresh(true);
 }
 
 /* ----- 회로 저장 · 불러오기 (JSON 파일) ----- */
 const CIRCUIT_FORMAT = 'breadboard-sim-circuit';
-function exportCircuit() {
+async function exportCircuit() {
   if (!state.parts.length) { toast('저장할 회로가 없어요. 부품을 먼저 배치해 주세요.'); return; }
+  const nameInput = $('#circuitNameInput');
+  const circuitName = (nameInput ? nameInput.value.trim() : '').slice(0, 40);
   const data = {
     format: CIRCUIT_FORMAT, version: 1, savedAt: new Date().toISOString(),
+    name: circuitName || null,
     psu: { V: state.psu.V, mode: state.psu.mode, freq: state.psu.freq },
     parts: state.parts.map(p => {
       const d = { type: p.type, a: p.a, b: p.b, name: p.name };
@@ -1918,11 +1926,29 @@ function exportCircuit() {
       return d;
     })
   };
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
+  const safeName = circuitName.replace(/[\\/:*?"<>|]+/g, '').trim();
+  const filename = (safeName || '브레드보드-회로') + '_' + ts + '.json';
+  const json = JSON.stringify(data, null, 2);
+  /* 휴대폰·태블릿 브라우저(특히 iOS Safari)는 <a download>로 blob을 저장하지 않고
+     그냥 새 탭에 텍스트로 열어버리는 경우가 많아, 공유 시트(파일로 저장/카톡 전송 등)를
+     지원하면 그걸 우선 쓴다. 지원 안 하면(대부분의 데스크톱) 기존 다운로드 방식으로. */
+  if (typeof File === 'function' && navigator.canShare) {
+    const file = new File([json], filename, { type: 'application/json' });
+    if (navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file], title: filename });
+        toast('회로 파일을 공유했어요.');
+        return;
+      } catch (e) {
+        if (e && e.name === 'AbortError') return;
+      }
+    }
+  }
+  const blob = new Blob([json], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  const ts = new Date().toISOString().slice(0, 16).replace('T', '_').replace(':', '');
-  a.href = url; a.download = '브레드보드-회로_' + ts + '.json';
+  a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
   toast('회로를 JSON 파일로 저장했어요.');
@@ -1955,8 +1981,12 @@ function importCircuit(text) {
     freq: (f >= F_MIN && f <= F_MAX) ? f : 1000
   };
   ui.selected = null; ui.pending = null; ui.meter = { a: null, b: null }; ui.scope = { ch1: null, ch2: null }; ui.transient = null; ui.note = null;
+  const loadedName = typeof o.name === 'string' ? o.name.trim().slice(0, 40) : '';
+  const nameInput = $('#circuitNameInput');
+  if (nameInput) nameInput.value = loadedName;
   refresh(true);
-  toast(!state.parts.length ? '불러올 부품이 없어요.' : skipped ? '회로를 불러왔어요. (겹치거나 잘못된 부품 ' + skipped + '개는 제외)' : '회로를 불러왔어요.');
+  const base = !state.parts.length ? '불러올 부품이 없어요.' : skipped ? '회로를 불러왔어요. (겹치거나 잘못된 부품 ' + skipped + '개는 제외)' : '회로를 불러왔어요.';
+  toast(loadedName && state.parts.length ? base + ' (' + loadedName + ')' : base);
 }
 
 /* ================= 입력 ================= */
