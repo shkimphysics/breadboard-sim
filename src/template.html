@@ -908,17 +908,18 @@ function renderInspector() {
     h += '<div class="field"><span class="lab">이름</span><div class="numin"><input type="text" id="inpName" maxlength="16" value="' + esc(p.name) + '" aria-label="축전기 이름"></div></div>';
     h += '<div class="field"><span class="lab">정전용량</span><div class="numin"><input type="number" id="inpC" min="0.000001" step="any" value="' + (p.C * 1e6) + '" aria-label="정전용량(마이크로패럿)"><span class="muted">µF</span></div><div class="chips" id="cChips">' +
       C_CHIPS.map(v => '<button class="chip" data-act="setC" data-v="' + v + '" aria-pressed="' + (v === p.C) + '">' + fmtC(v) + '</button>').join('') + '</div></div>';
-    if (state.psu.mode !== 'ac') h += '<div class="field"><button class="btn small" data-act="runTransient">충전 곡선 보기</button></div>';
   } else if (p.type === 'inductor') {
     h += '<div class="field"><span class="lab">이름</span><div class="numin"><input type="text" id="inpName" maxlength="16" value="' + esc(p.name) + '" aria-label="인덕터 이름"></div></div>';
     h += '<div class="field"><span class="lab">인덕턴스</span><div class="numin"><input type="number" id="inpL" min="0.001" step="any" value="' + (p.L * 1e3) + '" aria-label="인덕턴스(밀리헨리)"><span class="muted">mH</span></div><div class="chips" id="lChips">' +
       L_CHIPS.map(v => '<button class="chip" data-act="setL" data-v="' + v + '" aria-pressed="' + (v === p.L) + '">' + fmtL(v) + '</button>').join('') + '</div></div>';
-    if (state.psu.mode !== 'ac') h += '<div class="field"><button class="btn small" data-act="runTransient">전류 변화 곡선 보기</button></div>';
   }
   const ac = state.psu.mode === 'ac';
   h += '<dl class="meas"><div><dt>전압 V</dt><dd data-m="v">–</dd></div><div><dt>전류 I</dt><dd data-m="i">–</dd></div><div><dt>전력 P</dt><dd data-m="p">–</dd></div>' +
     (ac ? '<div><dt>위상차 φ</dt><dd data-m="phi">–</dd></div>' : '') + '</dl>';
   h += '<div class="formula" data-m="formula"></div><div data-m="warn"></div>';
+  if ((p.type === 'capacitor' || p.type === 'inductor') && !ac) {
+    h += '<div class="field"><span class="lab">' + (p.type === 'capacitor' ? '충전·방전 곡선 (시간에 따른 변화)' : '전류 변화 곡선 (시간에 따른 변화)') + '</span></div>';
+  }
   h += '<div id="transientResult" hidden><div class="scope-wrap"><canvas id="transientCanvas"></canvas></div><div class="scope-legend" id="transientLegend"></div></div>';
   h += '<p class="muted" style="margin:10px 0 0;font-size:12px">꽂힌 위치 ' + p.a + ' → ' + p.b + '</p>';
   box.innerHTML = h;
@@ -1117,8 +1118,13 @@ function updateTransientGraph() {
   const box = $('#transientResult');
   if (!box) return;
   const p = sel();
+  const autoable = p && (p.type === 'capacitor' || p.type === 'inductor') && state.psu.mode !== 'ac';
+  if (!autoable) { box.hidden = true; return; }
+  const sig = transientSig();
+  if (!ui.transient || ui.transient.partId !== p.id || ui.transient.sig !== sig) {
+    ui.transient = { partId: p.id, result: solveCircuitTransient(state.parts, state.psu, G), sig };
+  }
   const tr = ui.transient;
-  if (!p || !tr || tr.partId !== p.id || tr.sig !== transientSig()) { box.hidden = true; return; }
   box.hidden = false;
   const res = tr.result;
   const isV = p.type === 'capacitor';
@@ -1516,11 +1522,6 @@ document.addEventListener('click', e => {
     case 'fuse': state.psu.fuse = false; refresh(true); break;
     case 'clearMeter': ui.meter = { a: null, b: null }; refresh(false); break;
     case 'clearScope': ui.scope = { ch1: null, ch2: null }; refresh(false); break;
-    case 'runTransient': {
-      const p = sel();
-      if (p) { ui.transient = { partId: p.id, result: solveCircuitTransient(state.parts, state.psu, G), sig: transientSig() }; refresh(false); }
-      break;
-    }
     case 'closeNote': ui.note = null; refresh(false); break;
     case 'setMode': pushHistory(); state.psu.mode = v; refresh(true); break;
     case 'setFreq': pushHistory(); state.psu.freq = +v; fIn.value = fmtFin(+v); finHelp(''); refresh(false); break;

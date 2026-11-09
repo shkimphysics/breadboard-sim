@@ -102,6 +102,12 @@ ok($$('.part-capacitor').length === 1, '축전기 1개 배치');
 $('.tool[data-tool=select]').click();
 click(0, 0, $$('.part-capacitor')[0].querySelector('[data-role=body]'));
 ok(text('#inspector').includes('정전용량'), '축전기 인스펙터 표시: ' + text('#inspector').slice(0, 60));
+
+// 충전 곡선 보기 (과도상태) — 선택하자마자 버튼 없이 자동으로 표시됨
+ok(!$('#transientResult').hidden, '축전기 선택 시 충전 곡선 자동 표시');
+ok(!!$('#transientCanvas'), '충전 곡선 캔버스 생성');
+ok(/τ/.test(text('#transientLegend')) && /최종값/.test(text('#transientLegend')), '충전 곡선 범례에 시정수·최종값 표시: ' + text('#transientLegend'));
+
 const capChip = $$('#cChips .chip').find(c => c.dataset.v === String(10e-6));
 capChip.click();
 ok(/10\s*µF/.test($('.part-capacitor').textContent), '축전기 칩으로 10µF 반영: ' + $('.part-capacitor').textContent);
@@ -109,16 +115,7 @@ const inpC = $('#inpC'); inpC.value = '47'; inpC.dispatchEvent(new w.Event('inpu
 ok(/47\s*µF/.test($('.part-capacitor').textContent), '축전기 직접 입력 47µF 라벨: ' + $('.part-capacitor').textContent);
 const inpCN = $('#inpName'); inpCN.value = '평활콘덴서'; inpCN.dispatchEvent(new w.Event('input', { bubbles: true }));
 ok($('.part-capacitor').textContent.includes('평활콘덴서'), '축전기 이름 변경: ' + $('.part-capacitor').textContent);
-
-// 충전 곡선 보기 (과도상태)
-ok($('#transientResult').hidden, '초기에는 충전 곡선 숨김');
-ok(!!$('[data-act=runTransient]'), '"충전 곡선 보기" 버튼 존재');
-$('[data-act=runTransient]').click();
-ok(!$('#transientResult').hidden, '버튼 클릭 후 충전 곡선 표시');
-ok(!!$('#transientCanvas'), '충전 곡선 캔버스 생성');
-ok(/τ/.test(text('#transientLegend')) && /최종값/.test(text('#transientLegend')), '충전 곡선 범례에 시정수·최종값 표시: ' + text('#transientLegend'));
-const inpC2 = $('#inpC'); inpC2.value = '100'; inpC2.dispatchEvent(new w.Event('input', { bubbles: true }));
-ok($('#transientResult').hidden, '값을 바꾸면 충전 곡선이 다시 숨겨짐(신선도 체크)');
+ok(!$('#transientResult').hidden, '값을 바꿔도 충전 곡선이 계속 표시(자동 재계산)');
 
 // 인덕터 배치 및 값 변경
 $('.tool[data-tool=inductor]').click();
@@ -127,11 +124,10 @@ ok($$('.part-inductor').length === 1, '인덕터 1개 배치');
 $('.tool[data-tool=select]').click();
 click(0, 0, $$('.part-inductor')[0].querySelector('[data-role=body]'));
 ok(text('#inspector').includes('인덕턴스'), '인덕터 인스펙터 표시: ' + text('#inspector').slice(0, 60));
+ok(!$('#transientResult').hidden, '인덕터 선택 시 전류 변화 곡선 자동 표시');
 const inpL = $('#inpL'); inpL.value = '100'; inpL.dispatchEvent(new w.Event('input', { bubbles: true }));
 ok(/100\s*mH/.test($('.part-inductor').textContent), '인덕터 직접 입력 100mH 라벨: ' + $('.part-inductor').textContent);
-ok(!!$('[data-act=runTransient]'), '인덕터에도 "전류 변화 곡선 보기" 버튼 존재');
-$('[data-act=runTransient]').click();
-ok(!$('#transientResult').hidden, '인덕터 전류 변화 곡선 표시');
+ok(!$('#transientResult').hidden, '인덕터 값을 바꿔도 전류 변화 곡선 계속 표시');
 
 // 전압 슬라이더
 const vi = $('#vIn'); vi.value = '9'; vi.dispatchEvent(new w.Event('input', { bubbles: true }));
