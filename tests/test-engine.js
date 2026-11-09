@@ -184,6 +184,9 @@ function nearestIdx(tArr, target) { let bi = 0, bd = Infinity; for (let i = 0; i
   check('RC 충전(t≈5τ) 축전기전압 비율(기대 ~1)', out.parts.c.v[i5] / 10, 0.98, 1.01);
   if (!out.converged) fail++;
   check('RC 관찰시간(5τ~60τ 사이)', out.duration, 5 * tau, 60 * tau);
+  // liveClock(실시간 과도상태 표시)이 쓰는 절점 전압(netV)도 같이 검증 — a9(T9)는 축전기 +쪽과 같은 절점
+  check('RC netV(T9) t≈τ, 축전기 전압과 일치', out.netV.T9[i1], out.parts.c.v[i1] - 1e-6, out.parts.c.v[i1] + 1e-6);
+  check('RC netV(RT-, 접지) 항상 0', out.netV['RT-'][i5], -1e-9, 1e-9);
 }
 // RL: R=100Ω, L=1H, V=5V → τ=L/R=10ms
 {

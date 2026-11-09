@@ -390,7 +390,9 @@ function solveCircuitTransient(parts, psu, G, opts) {
     }
     const vt = vOf('RT+');
     const isup = psuOn ? gInt * (psu.V - vt) : 0;
-    return { parts: outParts, supply: { V: vt, I: isup } };
+    const netV = {};
+    idxMap.forEach((i, net) => { netV[net] = i < 0 ? 0 : V[i]; });
+    return { parts: outParts, supply: { V: vt, I: isup }, netV };
   }
 
   function runAttempt(duration) {
@@ -398,7 +400,7 @@ function solveCircuitTransient(parts, psu, G, opts) {
     const Vprev = {}, Iprev = {};
     caps.forEach(p => { Vprev[p.id] = 0; });
     inds.forEach(p => { Iprev[p.id] = 0; });
-    const t = [], partsOut = {}, supplyV = [], supplyI = [];
+    const t = [], partsOut = {}, supplyV = [], supplyI = [], netVOut = {};
     parts.forEach(p => { partsOut[p.id] = { v: [], i: [] }; });
     let firstRes = null;
     for (let k = 1; k <= N_STEPS; k++) {
@@ -409,6 +411,7 @@ function solveCircuitTransient(parts, psu, G, opts) {
       t.push(k * h);
       parts.forEach(p => { partsOut[p.id].v.push(res.parts[p.id].v); partsOut[p.id].i.push(res.parts[p.id].i); });
       supplyV.push(res.supply.V); supplyI.push(res.supply.I);
+      for (const net in res.netV) { (netVOut[net] || (netVOut[net] = [])).push(res.netV[net]); }
     }
     t.unshift(0);
     parts.forEach(p => {
@@ -419,7 +422,8 @@ function solveCircuitTransient(parts, psu, G, opts) {
     });
     supplyV.unshift(firstRes ? firstRes.supply.V : 0);
     supplyI.unshift(firstRes ? firstRes.supply.I : 0);
-    return { t, parts: partsOut, supply: { V: supplyV, I: supplyI } };
+    for (const net in netVOut) { netVOut[net].unshift(firstRes && net in firstRes.netV ? firstRes.netV[net] : 0); }
+    return { t, parts: partsOut, supply: { V: supplyV, I: supplyI }, netV: netVOut };
   }
 
   let duration = opts.seedT || 1e-3;
